@@ -74,6 +74,7 @@ local Cfg = {
 	HUD = true, Arrows = true,
 	-- power
 	Aim = false, AimHold = true, AimSmooth = 4, AimFOV = 180, AimPart = "HumanoidRootPart", ShowFOV = true,
+	Dodge = false, DodgeRange = 16, DodgeDist = 9, Alert = true, AlertRange = 40,
 	FPSBoost = false, AntiSlow = false, AntiKB = false, AlwaysEquip = false, PanicKey = Enum.KeyCode.Delete,
 	-- movement
 	Speed = false, SpeedValue = 24, Jump = false, JumpValue = 60,
@@ -145,7 +146,8 @@ local function connect(sig, fn)
 	if STATE and STATE.connect then return STATE.connect(sig, fn) end
 	return sig:Connect(fn)
 end
-local function alive() return not STATE or STATE.alive() end
+local unloaded = false
+local function alive() return not unloaded and (not STATE or STATE.alive()) end
 
 local function char() return LP.Character end
 local function hum() local c = char() return c and c:FindFirstChildOfClass("Humanoid") end
@@ -604,6 +606,67 @@ connect(RunService.RenderStepped, function(dt)
 	end
 end)
 
+-- Proximity alert ---------------------------------------------------------------------
+-- In a game about hidden players, a number on screen telling you who is close is the most useful ESP.
+local alertText = newDraw("Text", { Size = 18, Center = true, Outline = true, Color = Color3.fromRGB(255, 90, 90), Visible = false })
+local alertAcc = 0
+connect(RunService.RenderStepped, function(dt)
+	if not alive() then return end
+	alertAcc += dt
+	if alertAcc < 0.2 then return end
+	alertAcc = 0
+	if not Cfg.Alert then alertText.Visible = false return end
+	local plr, d = closestEnemy(Cfg.AlertRange)
+	if plr then
+		local vp = Camera.ViewportSize
+		alertText.Text = string.format("%s  %dm", plr.DisplayName, math.floor(d))
+		alertText.Position = Vector2.new(vp.X / 2, vp.Y * 0.14)
+		alertText.Visible = true
+	else
+		alertText.Visible = false
+	end
+end)
+
+-- Auto dodge (experimental) --------------------------------------------------------------
+-- Watches enemies inside DodgeRange. If one is playing an animation that lives in an "Attack"
+-- folder (how this game's weapons store their swings) and is facing you, sidestep.
+local lastDodge = 0
+task.spawn(function()
+	while alive() do
+		task.wait(0.05)
+		if Cfg.Dodge then
+			local myRoot, h = root(), hum()
+			if myRoot and h and h.Health > 0 and os.clock() - lastDodge > 0.6 then
+				for _, plr in ipairs(Players:GetPlayers()) do
+					local c, _, r = validEnemy(plr)
+					if c and (r.Position - myRoot.Position).Magnitude <= Cfg.DodgeRange then
+						local toMe = myRoot.Position - r.Position
+						local facing = toMe.Magnitude > 0 and r.CFrame.LookVector:Dot(toMe.Unit) or 0
+						local animator = c:FindFirstChildWhichIsA("Animator", true)
+						local attacking = false
+						if animator and facing > 0.3 then
+							for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+								local a = tr.Animation
+								if a and a.Parent and a.Parent.Name == "Attack" and tr.TimePosition < 0.4 then
+									attacking = true
+									break
+								end
+							end
+						end
+						if attacking then
+							lastDodge = os.clock()
+							local side = toMe.Unit:Cross(Vector3.yAxis)
+							if math.random() < 0.5 then side = -side end
+							pcall(function() myRoot.CFrame = myRoot.CFrame + side * Cfg.DodgeDist end)
+							break
+						end
+					end
+				end
+			end
+		end
+	end
+end)
+
 -- Keybinds ----------------------------------------------------------------------
 connect(UserInputService.InputBegan, function(input, gp)
 	if gp or not alive() then return end
@@ -805,7 +868,7 @@ cleanup(stopFly)
 
 -- Panic -----------------------------------------------------------------------
 local function panic()
-	for _, k in ipairs({ "Aura", "NoCD", "Aim", "Hitbox", "Stick", "FaceTarget", "Rolling", "ESP", "Fly", "Noclip", "Speed", "Jump", "AntiSlow", "AntiKB", "Fullbright", "FOVOn" }) do
+	for _, k in ipairs({ "Aura", "NoCD", "Aim", "Hitbox", "Stick", "FaceTarget", "Rolling", "ESP", "Fly", "Noclip", "Speed", "Jump", "Dodge", "AntiSlow", "AntiKB", "Fullbright", "FOVOn" }) do
 		setToggle(k, false)
 	end
 	stopFly()
@@ -955,6 +1018,11 @@ Power:CreateButton({ Name = "Aim At: Head / Body (toggle)", Callback = function(
 	Cfg.AimPart = Cfg.AimPart == "Head" and "HumanoidRootPart" or "Head"
 	Luna:Notification({ Title = "Aimlock", Content = "Aiming at " .. Cfg.AimPart, Icon = "my_location", ImageSource = "Material" })
 end })
+tog(Power, "Auto Dodge (experimental)", "Dodge", "Sidesteps when a nearby enemy starts a swing at you. May not beat the server's timing")
+sld(Power, "Dodge Trigger Range", "DodgeRange", 6, 30)
+sld(Power, "Dodge Distance", "DodgeDist", 4, 16)
+tog(Power, "Proximity Alert", "Alert", "Shows the nearest enemy's name and distance near the top of the screen")
+sld(Power, "Alert Range", "AlertRange", 10, 200)
 tog(Power, "Anti Slow", "AntiSlow", "Stops swing and hit slowdowns from reducing your speed")
 tog(Power, "Anti Knockback", "AntiKB", "Cancels most of the knockback you take")
 tog(Power, "Always Hold Weapon", "AlwaysEquip", "Re-equips your weapon whenever it is put away")
@@ -1054,6 +1122,16 @@ task.spawn(function()
 	end
 end)
 cleanup(function() if Cfg.AutoSave then saveCfg() end end)
+Misc:CreateButton({ Name = "Unload Hub", Description = "Turns everything off and removes the menu", Callback = function()
+	panic()
+	if getgenv().FurinaHubUnload then
+		getgenv().FurinaHubUnload()
+	else
+		unloaded = true
+		pcall(function() Luna:Destroy() end)
+		pcall(removeAllESP)
+	end
+end })
 Misc:CreateButton({ Name = "Rejoin Server", Callback = function()
 	TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
 end })
