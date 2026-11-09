@@ -9,6 +9,41 @@
 
 getgenv().ConfirmLuna = true
 
+-- Standalone mode: when run through loadstring (no live-reload STATE), provide our own
+-- teardown so executing it twice replaces the old copy instead of stacking a second one.
+local STATE = STATE
+if not STATE then
+	if getgenv().FurinaHubUnload then pcall(getgenv().FurinaHubUnload) end
+	local cleanups, conns, running, hooks = {}, {}, true, {}
+	STATE = {
+		onCleanup = function(f) cleanups[#cleanups + 1] = f end,
+		connect = function(sig, fn)
+			local c = sig:Connect(fn)
+			conns[#conns + 1] = c
+			return c
+		end,
+		alive = function() return running end,
+	}
+	if hookmetamethod and getnamecallmethod and newcclosure then
+		local old
+		old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+			if running then
+				local m = getnamecallmethod()
+				local fn = hooks[m]
+				if fn then pcall(fn, self, m, ...) end
+			end
+			return old(self, ...)
+		end))
+		STATE.namecallHook = function(method, fn) hooks[method] = fn end
+	end
+	getgenv().FurinaHubUnload = function()
+		running = false
+		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+		for _, f in ipairs(cleanups) do pcall(f) end
+		getgenv().FurinaHubUnload = nil
+	end
+end
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
