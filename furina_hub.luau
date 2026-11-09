@@ -82,6 +82,8 @@ local Cfg = {
 	Fullbright = false, FOVOn = false, FOV = 70, AntiAFK = true,
 }
 
+getgenv().FurinaCfg = Cfg -- live settings table, handy for debugging from an executor console
+
 -- Config save/load ---------------------------------------------------------------
 local HttpService = game:GetService("HttpService")
 local CFG_FILE = "FurinaHub/silent_assassins.json"
