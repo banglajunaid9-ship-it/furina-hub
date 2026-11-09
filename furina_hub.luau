@@ -74,7 +74,7 @@ local Cfg = {
 	HUD = true, Arrows = true,
 	-- power
 	Aim = false, AimHold = true, AimSmooth = 4, AimFOV = 180, AimPart = "HumanoidRootPart", ShowFOV = true,
-	AntiKB = false, AlwaysEquip = false, PanicKey = Enum.KeyCode.Delete,
+	FPSBoost = false, AntiSlow = false, AntiKB = false, AlwaysEquip = false, PanicKey = Enum.KeyCode.Delete,
 	-- movement
 	Speed = false, SpeedValue = 24, Jump = false, JumpValue = 60,
 	InfJump = false, Noclip = false, Fly = false, FlySpeed = 60,
@@ -215,7 +215,13 @@ local function removeESP(plr)
 	local o = esp[plr]
 	if not o then return end
 	for k, d in pairs(o) do
-		if typeof(d) == "Instance" then d:Destroy() else pcall(function() d:Remove() end) end
+		if typeof(d) == "Instance" then
+			d:Destroy()
+		else
+			pcall(function() d:Remove() end)
+			local i = table.find(allDrawings, d)
+			if i then table.remove(allDrawings, i) end -- don't keep dead handles forever
+		end
 	end
 	esp[plr] = nil
 end
@@ -226,6 +232,7 @@ local function removeAllESP()
 	table.clear(allDrawings)
 end
 
+local hlColors = setmetatable({}, { __mode = "k" }) -- last color given to each Highlight
 local cachedTarget, targetClock = nil, 0
 local anyESP = false
 local function renderESP()
@@ -268,9 +275,12 @@ local function renderESP()
 					hl.Parent = c
 					o.hl = hl
 				end
-				o.hl.FillColor = color
-				o.hl.OutlineColor = color
-				o.hl.Enabled = true
+				if hlColors[o.hl] ~= color then
+					hlColors[o.hl] = color
+					o.hl.FillColor = color
+					o.hl.OutlineColor = color
+				end
+				if not o.hl.Enabled then o.hl.Enabled = true end
 			elseif o.hl then
 				o.hl.Enabled = false
 			end
@@ -623,6 +633,26 @@ cleanup(function()
 	if patchedAC and origCooldown then patchedAC._onCooldown = origCooldown end
 end)
 
+-- Anti slow -----------------------------------------------------------------------
+-- SpeedController multiplies WalkSpeed by named modifiers (e.g. "AttackSlow"). While
+-- AntiSlow is on, any modifier below 1 is stored as 1 so it has no effect.
+local patchedSC, origAddMod
+do
+	local ok, SC = pcall(function()
+		return require(RS.Modules.ClientGameHandler.ClientCombatHandler.CombatControllers.CharacterController.SpeedController)
+	end)
+	if ok and type(SC) == "table" and type(SC.addModifier) == "function" then
+		patchedSC, origAddMod = SC, SC.addModifier
+		SC.addModifier = function(self, name, mult)
+			if Cfg.AntiSlow and type(mult) == "number" and mult < 1 then mult = 1 end
+			return origAddMod(self, name, mult)
+		end
+	end
+end
+cleanup(function()
+	if patchedSC and origAddMod then patchedSC.addModifier = origAddMod end
+end)
+
 -- Aimlock -------------------------------------------------------------------
 local fovCircle = newDraw("Circle", { Thickness = 1, Filled = false, Color = Color3.new(1, 1, 1), Transparency = 0.8, Visible = false, Radius = 180 })
 local function aimStep()
@@ -671,6 +701,9 @@ connect(RunService.Heartbeat, function()
 			r.AssemblyLinearVelocity = Vector3.new(0, v.Y, 0) + horiz.Unit * h.WalkSpeed
 		end
 	end
+	if Cfg.AntiSlow and not Cfg.Speed and h.WalkSpeed < 16 and h.WalkSpeed > 0 then
+		h.WalkSpeed = 16 -- catches slows applied outside the SpeedController
+	end
 	if Cfg.AlwaysEquip and h.Health > 0 and not toolOf(char()) then
 		local t = LP.Backpack:FindFirstChildOfClass("Tool")
 		if t then h:EquipTool(t) end
@@ -690,6 +723,40 @@ local function stopSpectate()
 	if h then Camera.CameraSubject = h end
 end
 cleanup(stopSpectate)
+
+-- FPS boost ------------------------------------------------------------------------
+-- Turns off particle emitters, beams, trails, smoke and fire (including new ones as they
+-- spawn) and drops shadows. Everything it disables is remembered and restored.
+local boosted = {}
+local boostConn
+local FX = { ParticleEmitter = true, Beam = true, Trail = true, Smoke = true, Fire = true, Sparkles = true }
+local function boostOne(d)
+	if FX[d.ClassName] and d.Enabled then
+		boosted[d] = true
+		d.Enabled = false
+	end
+end
+local function setBoost(on)
+	if boostConn then boostConn:Disconnect() boostConn = nil end
+	if on then
+		task.spawn(function()
+			local n = 0
+			for _, d in ipairs(workspace:GetDescendants()) do
+				if not (Cfg.FPSBoost and alive()) then return end
+				boostOne(d)
+				n += 1
+				if n % 1500 == 0 then task.wait() end -- never block a frame
+			end
+		end)
+		boostConn = workspace.DescendantAdded:Connect(function(d) if alive() then boostOne(d) end end)
+		Lighting.GlobalShadows = false
+	else
+		for d in pairs(boosted) do pcall(function() d.Enabled = true end) end
+		table.clear(boosted)
+		Lighting.GlobalShadows = true
+	end
+end
+cleanup(function() setBoost(false) end)
 
 -- Fullbright ----------------------------------------------------------------
 local origLight = {
@@ -736,7 +803,7 @@ cleanup(stopFly)
 
 -- Panic -----------------------------------------------------------------------
 local function panic()
-	for _, k in ipairs({ "Aura", "NoCD", "Aim", "Hitbox", "Stick", "FaceTarget", "Rolling", "ESP", "Fly", "Noclip", "Speed", "Jump", "AntiKB", "Fullbright", "FOVOn" }) do
+	for _, k in ipairs({ "Aura", "NoCD", "Aim", "Hitbox", "Stick", "FaceTarget", "Rolling", "ESP", "Fly", "Noclip", "Speed", "Jump", "AntiSlow", "AntiKB", "Fullbright", "FOVOn" }) do
 		setToggle(k, false)
 	end
 	stopFly()
@@ -752,9 +819,14 @@ connect(UserInputService.InputBegan, function(input, gp)
 end)
 
 -- Main loops -----------------------------------------------------------------
-connect(RunService.RenderStepped, function()
+local espAcc = 0
+connect(RunService.RenderStepped, function(dt)
 	if not alive() then return end
-	renderESP()
+	espAcc += dt
+	if espAcc >= 1 / 60 then -- 60 ESP updates a second is plenty; skips the rest on fast machines
+		espAcc = 0
+		renderESP()
+	end
 	if Cfg.FOVOn then Camera.FieldOfView = Cfg.FOV end
 end)
 
@@ -881,6 +953,7 @@ Power:CreateButton({ Name = "Aim At: Head / Body (toggle)", Callback = function(
 	Cfg.AimPart = Cfg.AimPart == "Head" and "HumanoidRootPart" or "Head"
 	Luna:Notification({ Title = "Aimlock", Content = "Aiming at " .. Cfg.AimPart, Icon = "my_location", ImageSource = "Material" })
 end })
+tog(Power, "Anti Slow", "AntiSlow", "Stops swing and hit slowdowns from reducing your speed")
 tog(Power, "Anti Knockback", "AntiKB", "Cancels most of the knockback you take")
 tog(Power, "Always Hold Weapon", "AlwaysEquip", "Re-equips your weapon whenever it is put away")
 Power:CreateBind({ Name = "Panic Key", Description = "Turns every feature off at once", CurrentBind = Cfg.PanicKey.Name,
@@ -960,6 +1033,8 @@ tog(Move, "Fly", "Fly", "WASD + Space / Shift", function(v) if v then startFly()
 sld(Move, "Fly Speed", "FlySpeed", 20, 200)
 
 local Misc = tab("Misc", "settings")
+tog(Misc, "FPS Boost", "FPSBoost", "Disables particles, beams, trails and shadows to raise fps. Turn off to restore", setBoost)
+if Cfg.FPSBoost then setBoost(true) end
 tog(Misc, "Anti AFK", "AntiAFK")
 tog(Misc, "Auto Save Config", "AutoSave", "Saves every 20 seconds and loads on start (FurinaHub folder in your workspace)")
 Misc:CreateButton({ Name = "Save Config Now", Callback = function()
