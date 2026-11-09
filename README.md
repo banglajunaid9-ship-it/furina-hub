@@ -18,7 +18,7 @@ Running it again replaces the previous copy instead of stacking a second one.
 - **Power:** aimlock with FOV circle, auto dodge (experimental), proximity alert, anti slow, anti knockback, always hold weapon, panic key (Delete), spectate and teleport by name
 - **Luck:** auto roll gacha chests and stop at a chosen rarity (rolls are server-side, odds cannot be changed)
 - **Movement:** speed, jump, infinite jump, noclip, fly
-- **Misc:** named config profiles, FPS boost, anti AFK, unload, rejoin
+- **Misc:** named config profiles, FPS boost (effects, post effects, terrain grass, lowest quality, custom FPS cap, all restorable), anti AFK, unload, rejoin
 
 ## Configs
 

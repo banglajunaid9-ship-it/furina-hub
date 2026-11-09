@@ -1,16 +1,28 @@
--- Furina Hub | Silent Assassins (placeId 103854444055060)
--- UI: Luna Interface Suite (discontinued upstream, still loads)
--- Run via live-reload (uses STATE for clean teardown on re-run)
---
--- Game notes: combat is client-detected. AttackController -> HitboxController ->
--- ResolverController builds hit data, then fires
---   ReplicatedStorage.Events.GameRemoteFunction:InvokeServer("AttemptWeaponHit", weaponData, hits)
--- Kill Aura replays that call for enemies in range.
+--[[
+	Furina Hub | Silent Assassins (placeId 103854444055060)
+	UI: Luna Interface Suite (discontinued upstream, still loads)
 
-getgenv().ConfirmLuna = true
+	Run with loadstring, or through live-reload (STATE). Running it again replaces the old copy.
 
--- Standalone mode: when run through loadstring (no live-reload STATE), provide our own
--- teardown so executing it twice replaces the old copy instead of stacking a second one.
+	Game notes
+	- Combat is client-detected. AttackController -> HitboxController -> ResolverController builds hit data and fires
+	  ReplicatedStorage.Events.GameRemoteFunction:InvokeServer("AttemptWeaponHit", weaponData, hits).
+	  Kill Aura replays that call for every enemy in range.
+	- Swings live in an "Attack" animation folder; the hitbox is a "HitboxPart" cloned into HumanoidRootPart per swing.
+	- Gacha rolls are decided on the server, so luck cannot be changed from here.
+
+	Layout
+	 1. Bootstrap        5. Enemy cache + helpers     9. Gacha, HUD, alert
+	 2. Services         6. Scheduler                10. World (light, FOV, FPS boost)
+	 3. Settings (Cfg)   7. ESP, radar, chest ESP    11. Movement
+	 4. Config files     8. Combat                   12. Input, panic, UI
+]]
+
+getgenv().ConfirmLuna = true -- hides Luna's deprecation popup
+
+------------------------------------------------------------------------------------------------------
+-- 1. Bootstrap: standalone teardown when STATE (live-reload) is not provided
+------------------------------------------------------------------------------------------------------
 local STATE = STATE
 if not STATE then
 	if getgenv().FurinaHubUnload then pcall(getgenv().FurinaHubUnload) end
@@ -39,70 +51,88 @@ if not STATE then
 	getgenv().FurinaHubUnload = function()
 		running = false
 		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-		for _, f in ipairs(cleanups) do pcall(f) end
+		for i = #cleanups, 1, -1 do pcall(cleanups[i]) end
 		getgenv().FurinaHubUnload = nil
 	end
 end
 
+local unloaded = false
+local function alive() return not unloaded and STATE.alive() end
+local function cleanup(fn) STATE.onCleanup(fn) end
+local function connect(sig, fn) return STATE.connect(sig, fn) end
+
+------------------------------------------------------------------------------------------------------
+-- 2. Services and shared locals
+------------------------------------------------------------------------------------------------------
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local VirtualUser = game:GetService("VirtualUser")
 local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local GuiService = game:GetService("GuiService")
+local CollectionService = game:GetService("CollectionService")
 local RS = game:GetService("ReplicatedStorage")
 
 local LP = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local BLACK, WHITE = Color3.new(0, 0, 0), Color3.new(1, 1, 1)
 
 local Luna = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/master/source.lua"))()
+local function notify(title, text, icon)
+	Luna:Notification({ Title = title, Content = text, Icon = icon or "info", ImageSource = "Material" })
+end
 
+------------------------------------------------------------------------------------------------------
+-- 3. Settings
+------------------------------------------------------------------------------------------------------
 local Cfg = {
-	-- esp
-	ESP = false, Box = true, BoxStyle = "Corners", BoxThick = 1, BoxFill = false,
+	-- ESP
+	ESP = false, ESPKey = Enum.KeyCode.Z, ESPMax = 1500,
+	Box = true, BoxStyle = "Corners", BoxThick = 1, BoxFill = false,
 	Name = true, Health = true, HPText = true, Distance = true, Weapon = true,
 	TargetTag = true, Threat = true, TextSize = 13,
 	Skeleton = true, SkelDist = 220, HeadDot = false, LookLine = false,
-	Tracers = false, TracerOrigin = "Bottom", Chams = true, ChamsFill = 65,
-	VisCheck = true, Rainbow = false, ESPMax = 1500, ChestESP = false,
+	Chams = true, ChamsFill = 65, VisCheck = true, Rainbow = false,
+	Tracers = false, TracerOrigin = "Bottom", Arrows = true, ChestESP = false,
 	Radar = true, RadarRange = 120, RadarSize = 70, RadarX = 95, RadarY = 175,
 	ESPColor = Color3.fromRGB(120, 170, 255), VisColor = Color3.fromRGB(90, 255, 120),
 	TargetColor = Color3.fromRGB(255, 70, 70), ThreatColor = Color3.fromRGB(255, 170, 0),
-	ESPKey = Enum.KeyCode.Z,
 	-- combat
-	Aura = false, AuraRange = 12, AuraDelay = 0.12, AuraAll = true, AutoEquip = true,
-	FaceTarget = false, Stick = false, StickDist = 4, SkipFF = true,
-	LowHPFirst = false, MaxTargets = 5, Ignore = {}, AuraKey = Enum.KeyCode.X,
+	Aura = false, AuraKey = Enum.KeyCode.X, AuraRange = 12, AuraDelay = 0.12, AuraAll = true,
+	AutoEquip = true, SkipFF = true, LowHPFirst = false, MaxTargets = 5, Ignore = {},
+	FaceTarget = false, Stick = false, StickDist = 4,
 	NoCD = false, NoCDDelay = 0.05,
 	Hitbox = false, HitboxMult = 2, ShowHitbox = false, SpoofHitbox = false,
-	-- luck / gacha
-	Rolling = false, ChestType = "Divine", RollDelay = 1.2, StopRarity = 4, MaxRolls = 50,
-	HUD = true, Arrows = true,
 	-- power
 	Aim = false, AimHold = true, AimSmooth = 4, AimFOV = 180, AimPart = "HumanoidRootPart", ShowFOV = true,
 	Dodge = false, DodgeRange = 16, DodgeDist = 9, Alert = true, AlertRange = 40,
-	FPSBoost = false, AntiSlow = false, AntiKB = false, AlwaysEquip = false, PanicKey = Enum.KeyCode.Delete,
+	AntiSlow = false, AntiKB = false, AlwaysEquip = false, PanicKey = Enum.KeyCode.Delete, TargetName = "",
+	-- gacha
+	Rolling = false, ChestType = "Divine", RollDelay = 1.2, StopRarity = 4, MaxRolls = 50,
 	-- movement
 	Speed = false, SpeedValue = 24, Jump = false, JumpValue = 60,
 	InfJump = false, Noclip = false, Fly = false, FlySpeed = 60,
-	-- world
-	Fullbright = false, FOVOn = false, FOV = 70, AntiAFK = true,
+	-- world / performance
+	HUD = true, Fullbright = false, FOVOn = false, FOV = 70, AntiAFK = true,
+	FPSBoost = false, BoostFX = true, BoostPost = true, BoostTerrain = true, BoostQuality = true,
+	FPSCapOn = false, FPSCap = 144,
+	AutoSave = true,
 }
-
 getgenv().FurinaCfg = Cfg -- live settings table, handy for debugging from an executor console
 
--- Config save/load ---------------------------------------------------------------
--- Settings live in <workspace>/FurinaHub/<profile>.json and the active profile name in
--- FurinaHub/_profile.txt. Auto-save writes whenever a setting changes (checked every 1.5s), so
--- nothing is lost if the game closes. Every file call is guarded because executors differ:
--- some throw if a folder already exists, and some lack isfolder or listfiles.
-local HttpService = game:GetService("HttpService")
+------------------------------------------------------------------------------------------------------
+-- 4. Config files
+-- <workspace>/FurinaHub/<profile>.json, active profile name in FurinaHub/_profile.txt. Auto-save writes
+-- whenever a setting changes. Every file call is guarded because executors differ (some throw if a
+-- folder already exists, some lack isfolder / listfiles).
+------------------------------------------------------------------------------------------------------
 local CFG_DIR = "FurinaHub"
 local PROFILE_FILE = CFG_DIR .. "/_profile.txt"
 local cfgProfile = "silent_assassins"
--- Not restored on launch: rolling spends currency; the others need setup code that only runs when toggled.
-local NOSAVE = { Rolling = true, Fly = true, Fullbright = true, Stick = true }
-Cfg.AutoSave = true
+-- never restored on launch: rolling spends currency; the rest need setup code that only runs when toggled
+local NOSAVE = { Rolling = true, Fly = true, Fullbright = true, Stick = true, TargetName = true }
 
 local fsOK = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
 local function cfgPath(name) return CFG_DIR .. "/" .. name .. ".json" end
@@ -114,21 +144,22 @@ end
 local function ensureDir()
 	if makefolder and not (isfolder and isfolder(CFG_DIR)) then pcall(makefolder, CFG_DIR) end
 end
-local function validNumber(v) return v == v and v ~= math.huge and v ~= -math.huge end
 
 local function encodeCfg()
 	local t = {}
 	for k, v in pairs(Cfg) do
 		if not NOSAVE[k] then
 			local ty = typeof(v)
-			if ty == "Color3" then t[k] = { __c = { v.R, v.G, v.B } }
-			elseif ty == "EnumItem" then t[k] = { __k = v.Name }
+			if ty == "Color3" then
+				t[k] = { __c = { v.R, v.G, v.B } }
+			elseif ty == "EnumItem" then
+				t[k] = { __k = v.Name }
 			elseif k == "Ignore" then
 				local names = {}
 				for n in pairs(v) do names[#names + 1] = n end
 				t[k] = { __ig = names }
 			elseif ty == "number" then
-				if validNumber(v) then t[k] = v end
+				if v == v and v ~= math.huge and v ~= -math.huge then t[k] = v end
 			elseif ty == "boolean" or ty == "string" then
 				t[k] = v
 			end
@@ -137,7 +168,7 @@ local function encodeCfg()
 	return HttpService:JSONEncode(t)
 end
 
--- cheap, order-independent fingerprint used to notice that something changed
+-- order-independent fingerprint used to notice that something changed
 local function signature()
 	local parts = {}
 	for k, v in pairs(Cfg) do
@@ -208,64 +239,118 @@ if fsOK and isfile(PROFILE_FILE) then
 	local okp, saved = pcall(readfile, PROFILE_FILE)
 	if okp then cfgProfile = cleanName(saved) or cfgProfile end
 end
-local cfgLoaded = loadCfg()
+loadCfg()
 
-local function cleanup(fn) if STATE and STATE.onCleanup then STATE.onCleanup(fn) end end
-local function connect(sig, fn)
-	if STATE and STATE.connect then return STATE.connect(sig, fn) end
-	return sig:Connect(fn)
-end
-local unloaded = false
-local function alive() return not unloaded and (not STATE or STATE.alive()) end
-
+------------------------------------------------------------------------------------------------------
+-- 5. Character and enemy helpers
+-- One cached list of enemies (rebuilt 10x a second) replaces the repeated player scans every
+-- feature used to do each frame. Health and position are still read live.
+------------------------------------------------------------------------------------------------------
 local function char() return LP.Character end
-local function hum() local c = char() return c and c:FindFirstChildOfClass("Humanoid") end
-local function root() local c = char() return c and c:FindFirstChild("HumanoidRootPart") end
+local function hum() local c = LP.Character return c and c:FindFirstChildOfClass("Humanoid") end
+local function root() local c = LP.Character return c and c:FindFirstChild("HumanoidRootPart") end
 local function toolOf(c) return c and c:FindFirstChildOfClass("Tool") end
 
--- Target helpers --------------------------------------------------------
-local function validEnemy(plr)
-	if plr == LP then return end
-	local c = plr.Character
-	if not c then return end
-	local h = c:FindFirstChildOfClass("Humanoid")
-	local r = c:FindFirstChild("HumanoidRootPart")
-	if not h or not r or h.Health <= 0 then return end
-	return c, h, r
+local enemies, enemiesAt = {}, 0
+local function getEnemies()
+	local now = os.clock()
+	if now - enemiesAt > 0.1 then
+		enemiesAt = now
+		local list = {}
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LP then
+				local c = plr.Character
+				local h = c and c:FindFirstChildOfClass("Humanoid")
+				local r = c and c:FindFirstChild("HumanoidRootPart")
+				if h and r then list[#list + 1] = { plr = plr, c = c, h = h, r = r } end
+			end
+		end
+		enemies = list
+	end
+	return enemies
 end
+local function isLive(e) return e.h.Health > 0 and e.r.Parent ~= nil end
 
-local function closestEnemy(maxDist)
+-- closest live enemy entry and its distance, or nil
+local function closest(maxDist)
 	local myRoot = root()
 	if not myRoot then return end
-	local best, bestD
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local c, h, r = validEnemy(plr)
-		if c then
-			local d = (r.Position - myRoot.Position).Magnitude
-			if d <= (maxDist or 1e9) and (not bestD or d < bestD) then best, bestD = plr, d end
+	local pos = myRoot.Position
+	local best, bestD = nil, maxDist or math.huge
+	for _, e in ipairs(getEnemies()) do
+		if isLive(e) then
+			local d = (e.r.Position - pos).Magnitude
+			if d <= bestD then best, bestD = e, d end
 		end
 	end
-	return best, bestD
+	return best, best and bestD
 end
 
--- true while this animator is playing a swing (this game stores swings in a folder named "Attack")
-local function isAttacking(animator)
+local function isIgnored(plr)
+	return Cfg.Ignore[plr.Name:lower()] or Cfg.Ignore[plr.DisplayName:lower()]
+end
+
+-- true while this animator is playing a swing (swings live in a folder named "Attack")
+local function isAttacking(animator, maxTime)
 	for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
 		local a = tr.Animation
-		if a and a.Parent and a.Parent.Name == "Attack" and tr.TimePosition < 0.5 then return true end
+		if a and a.Parent and a.Parent.Name == "Attack" and tr.TimePosition < (maxTime or 0.5) then return true end
 	end
 	return false
 end
 
--- ESP (Drawing) -----------------------------------------------------------
--- Per-player pool: boxes (full or corner style), health bar + number, name, flags, info line,
--- skeleton, head dot, look direction, tracer, off-screen arrow, radar dot and chams.
+------------------------------------------------------------------------------------------------------
+-- 6. Scheduler: one Heartbeat and one RenderStepped connection run every feature.
+-- A failing feature warns once and keeps its neighbours running.
+------------------------------------------------------------------------------------------------------
+local frameJobs, renderJobs, timers = {}, {}, {}
+
+local function run(job, ...)
+	local ok, err = pcall(job.fn, ...)
+	if not ok and not job.failed then
+		job.failed = true
+		warn("[FurinaHub] " .. job.name .. ": " .. tostring(err))
+	end
+end
+local function onFrame(name, fn) frameJobs[#frameJobs + 1] = { name = name, fn = fn } end
+local function onRender(name, fn) renderJobs[#renderJobs + 1] = { name = name, fn = fn } end
+-- interval can be a number or a function returning one
+local function every(name, interval, fn) timers[#timers + 1] = { name = name, interval = interval, fn = fn, nextAt = 0 } end
+
+connect(RunService.Heartbeat, function(dt)
+	if not alive() then return end
+	for i = 1, #frameJobs do run(frameJobs[i], dt) end
+	local now = os.clock()
+	for i = 1, #timers do
+		local t = timers[i]
+		if now >= t.nextAt then
+			local iv = t.interval
+			t.nextAt = now + (type(iv) == "function" and iv() or iv)
+			run(t)
+		end
+	end
+end)
+
+connect(RunService.RenderStepped, function(dt)
+	if not alive() then return end
+	if workspace.CurrentCamera ~= Camera then Camera = workspace.CurrentCamera end
+	for i = 1, #renderJobs do run(renderJobs[i], dt) end
+end)
+
+-- UI registries: let keybinds, auto-stop and Load Config move the visible switches
+local Toggles, Sliders = {}, {}
+local function setToggle(key, v)
+	Cfg[key] = v
+	local t = Toggles[key]
+	if t then pcall(function() t:Set(v) end) end
+end
+
+------------------------------------------------------------------------------------------------------
+-- 7. ESP (Drawing): boxes, health, text, skeleton, tracers, arrows, radar, chams, chest labels
+------------------------------------------------------------------------------------------------------
 local esp = {} -- [Player] = pool of drawings + cached state
 local allDrawings = {}
 local shadow = setmetatable({}, { __mode = "k" }) -- last value written to each Drawing property
-local BLACK, WHITE = Color3.new(0, 0, 0), Color3.new(1, 1, 1)
-local GuiService = game:GetService("GuiService")
-local CollectionService = game:GetService("CollectionService")
 
 local function newDraw(kind, props)
 	local d = Drawing.new(kind)
@@ -274,7 +359,7 @@ local function newDraw(kind, props)
 	return d
 end
 
--- write a Drawing property only when it actually changed (cuts redundant renderer calls)
+-- write a Drawing property only when it changed (cuts redundant renderer calls)
 local function P(d, k, v)
 	local s = shadow[d]
 	if not s then s = {} shadow[d] = s end
@@ -299,7 +384,7 @@ local BONES_R15 = {
 local function getESP(plr)
 	local o = esp[plr]
 	if o then return o end
-	o = { all = {}, cOut = {}, c = {}, bones = {}, vis = true, visT = 0, atk = false, atkT = 0 }
+	o = { all = {}, cOut = {}, c = {}, bones = {}, vis = true, visT = 0, atk = false, atkT = 0, seen = 0 }
 	local function mk(kind, props)
 		local d = newDraw(kind, props)
 		o.all[#o.all + 1] = d
@@ -355,7 +440,7 @@ local function removeAllESP()
 	table.clear(allDrawings)
 end
 
--- radar ---------------------------------------------------------------------------
+-- radar -----------------------------------------------------------------------------------------
 local radar = {}
 local RD = { on = false } -- per-frame radar state shared with radarDot
 local function ensureRadar()
@@ -397,7 +482,7 @@ local function radarDot(o, r, myRoot, color)
 	P(o.dot, "Visible", true)
 end
 
--- corner-style box -----------------------------------------------------------------
+-- corner-style box ------------------------------------------------------------------------------
 local function seg(o, i, ax, ay, bx, by, color, thick, show)
 	local a, b = Vector2.new(ax, ay), Vector2.new(bx, by)
 	local out, ln = o.cOut[i], o.c[i]
@@ -417,7 +502,7 @@ local function setCorners(o, x, y, w, h, color, thick, show)
 	seg(o, 8, x2, y2, x2, y2 - L, color, thick, show)
 end
 
--- visibility (line of sight from your camera) ------------------------------------------
+-- line of sight from your camera ----------------------------------------------------------------
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = true
@@ -435,11 +520,22 @@ local function canSee(c, r)
 	return false
 end
 
--- main renderer -------------------------------------------------------------------------
+-- per-frame projection memo: a part shared by several bones is projected once
+local projMemo = {}
+local function proj(part)
+	local v = projMemo[part]
+	if not v then
+		v = Camera:WorldToViewportPoint(part.Position)
+		projMemo[part] = v
+	end
+	return v
+end
+
 local hlColors = setmetatable({}, { __mode = "k" }) -- last color / fill given to each Highlight
 local hlFills = setmetatable({}, { __mode = "k" })
-local cachedTarget, targetClock = nil, 0
+local cachedTarget, targetClock = nil, 0 -- closest enemy's player, refreshed 7x a second
 local anyESP = false
+local frameId = 0
 
 local function renderESP()
 	if not Cfg.ESP then
@@ -451,248 +547,254 @@ local function renderESP()
 		return
 	end
 	anyESP = true
+	frameId += 1
 
 	local myRoot = root()
 	local vp = Camera.ViewportSize
 	local now = os.clock()
 	if now - targetClock > 0.15 then
 		targetClock = now
-		cachedTarget = closestEnemy(1e9)
+		local e = closest()
+		cachedTarget = e and e.plr
 	end
 	local target = cachedTarget
 	local rainbow = Color3.fromHSV((now * 0.25) % 1, 0.8, 1)
 	if Cfg.Radar then radarFrame() else hideRadar() end
 
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= LP then
-			local c, h, r = validEnemy(plr)
-			local o = esp[plr]
-			if not c then
-				if o then hideAll(o) end
-				continue
-			end
-			o = o or getESP(plr)
+	for _, e in ipairs(getEnemies()) do
+		local plr, c, h, r = e.plr, e.c, e.h, e.r
+		local o = esp[plr]
+		if not isLive(e) then
+			if o then hideAll(o) o.seen = frameId end
+			continue
+		end
+		o = o or getESP(plr)
+		o.seen = frameId
 
-			local dist = myRoot and (myRoot.Position - r.Position).Magnitude or 0
+		local dist = myRoot and (myRoot.Position - r.Position).Magnitude or 0
 
-			-- state that only needs refreshing a few times a second
-			if Cfg.VisCheck and now - o.visT > 0.2 then
-				o.visT = now
-				o.vis = canSee(c, r)
-			end
-			if Cfg.Threat and dist < 60 then
-				if now - o.atkT > 0.1 then
-					o.atkT = now
-					if not o.animator or o.animator.Parent == nil then
-						o.animator = c:FindFirstChildWhichIsA("Animator", true)
-					end
-					o.atk = o.animator ~= nil and isAttacking(o.animator)
+		-- state that only needs refreshing a few times a second
+		if Cfg.VisCheck and now - o.visT > 0.2 then
+			o.visT = now
+			o.vis = canSee(c, r)
+		end
+		if Cfg.Threat and dist < 60 then
+			if now - o.atkT > 0.1 then
+				o.atkT = now
+				if not o.animator or o.animator.Parent == nil then
+					o.animator = c:FindFirstChildWhichIsA("Animator", true)
 				end
+				o.atk = o.animator ~= nil and isAttacking(o.animator)
+			end
+		else
+			o.atk = false
+		end
+
+		local color = Cfg.Rainbow and rainbow or Cfg.ESPColor
+		if Cfg.VisCheck and o.vis and not Cfg.Rainbow then color = Cfg.VisColor end
+		if plr == target then color = Cfg.TargetColor end
+		if o.atk and Cfg.Threat then color = Cfg.ThreatColor end
+
+		if dist > Cfg.ESPMax then
+			hideAll(o)
+			radarDot(o, r, myRoot, color)
+			continue
+		end
+
+		-- chams
+		if Cfg.Chams then
+			if not o.hl or o.hl.Parent == nil or o.hl.Adornee ~= c then
+				if o.hl then o.hl:Destroy() end
+				local hl = Instance.new("Highlight")
+				hl.Name = "FurinaChams"
+				hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+				hl.Adornee = c
+				hl.Parent = c
+				o.hl = hl
+			end
+			if hlColors[o.hl] ~= color then
+				hlColors[o.hl] = color
+				o.hl.FillColor = color
+				o.hl.OutlineColor = color
+			end
+			local fill = Cfg.ChamsFill / 100
+			if hlFills[o.hl] ~= fill then
+				hlFills[o.hl] = fill
+				o.hl.FillTransparency = fill
+			end
+			if not o.hl.Enabled then o.hl.Enabled = true end
+		elseif o.hl then
+			o.hl.Enabled = false
+		end
+
+		table.clear(projMemo)
+		local top, topOn = Camera:WorldToViewportPoint(r.Position + Vector3.new(0, 2.9, 0))
+		local bot = Camera:WorldToViewportPoint(r.Position - Vector3.new(0, 3.1, 0))
+		local rp = proj(r)
+
+		if not topOn or top.Z <= 0 then
+			hideAll(o)
+			if o.hl and Cfg.Chams then o.hl.Enabled = true end
+			if Cfg.Arrows then
+				local center = vp / 2
+				local v = Vector2.new(rp.X, rp.Y) - center
+				if rp.Z < 0 then v = -v end
+				if v.Magnitude < 1 then v = Vector2.new(0, 1) end
+				local dir = v.Unit
+				local perp = Vector2.new(-dir.Y, dir.X)
+				local pos = center + dir * math.min(vp.X, vp.Y) * 0.38
+				P(o.arrow, "PointA", pos + dir * 14)
+				P(o.arrow, "PointB", pos - dir * 6 + perp * 9)
+				P(o.arrow, "PointC", pos - dir * 6 - perp * 9)
+				P(o.arrow, "Color", color)
+				P(o.arrow, "Visible", true)
+				P(o.arrowTxt, "Text", math.floor(dist) .. "m")
+				P(o.arrowTxt, "Position", pos + dir * 28 - Vector2.new(0, 6))
+				P(o.arrowTxt, "Color", color)
+				P(o.arrowTxt, "Visible", true)
+			end
+		else
+			P(o.arrow, "Visible", false)
+			P(o.arrowTxt, "Visible", false)
+
+			local height = math.abs(bot.Y - top.Y)
+			local width = height * 0.55
+			local x, y = top.X - width / 2, top.Y
+			local pos, size = Vector2.new(x, y), Vector2.new(width, height)
+			local thick = Cfg.BoxThick
+			local full = Cfg.Box and Cfg.BoxStyle == "Full"
+			local corners = Cfg.Box and Cfg.BoxStyle ~= "Full"
+
+			P(o.boxOut, "Position", pos) P(o.boxOut, "Size", size) P(o.boxOut, "Thickness", thick + 2) P(o.boxOut, "Visible", full)
+			P(o.box, "Position", pos) P(o.box, "Size", size) P(o.box, "Color", color) P(o.box, "Thickness", thick) P(o.box, "Visible", full)
+			P(o.fill, "Position", pos) P(o.fill, "Size", size) P(o.fill, "Color", color) P(o.fill, "Visible", Cfg.BoxFill)
+			setCorners(o, x, y, width, height, color, thick, corners)
+
+			-- health bar and number
+			local frac = math.clamp(h.Health / math.max(h.MaxHealth, 1), 0, 1)
+			local bx = x - 5 - thick
+			P(o.hpBack, "From", Vector2.new(bx, y + height + 1)) P(o.hpBack, "To", Vector2.new(bx, y - 1)) P(o.hpBack, "Visible", Cfg.Health)
+			P(o.hp, "From", Vector2.new(bx, y + height)) P(o.hp, "To", Vector2.new(bx, y + height - height * frac))
+			P(o.hp, "Color", Color3.fromHSV(frac * 0.33, 1, 1)) P(o.hp, "Visible", Cfg.Health)
+			P(o.hpTxt, "Text", tostring(math.floor(h.Health)))
+			P(o.hpTxt, "Position", Vector2.new(bx - 13, y + height - height * frac - 6))
+			P(o.hpTxt, "Visible", Cfg.Health and Cfg.HPText)
+
+			-- text, scaled down with distance
+			local ts = math.clamp(Cfg.TextSize * (1.2 - dist / math.max(Cfg.ESPMax, 1) * 0.5), 9, 22)
+			P(o.name, "Text", plr.DisplayName)
+			P(o.name, "Size", ts)
+			P(o.name, "Position", Vector2.new(top.X, y - ts - 4))
+			P(o.name, "Color", color)
+			P(o.name, "Visible", Cfg.Name)
+
+			if o.atk and Cfg.Threat then
+				P(o.flag, "Text", "!! ATTACKING !!") P(o.flag, "Color", Cfg.ThreatColor)
+				P(o.flag, "Position", Vector2.new(top.X, y - ts * 2 - 8)) P(o.flag, "Size", ts) P(o.flag, "Visible", true)
+			elseif plr == target and Cfg.TargetTag then
+				P(o.flag, "Text", "TARGET") P(o.flag, "Color", Cfg.TargetColor)
+				P(o.flag, "Position", Vector2.new(top.X, y - ts * 2 - 8)) P(o.flag, "Size", ts) P(o.flag, "Visible", true)
 			else
-				o.atk = false
+				P(o.flag, "Visible", false)
 			end
 
-			local color = Cfg.Rainbow and rainbow or Cfg.ESPColor
-			if Cfg.VisCheck and o.vis and not Cfg.Rainbow then color = Cfg.VisColor end
-			if plr == target then color = Cfg.TargetColor end
-			if o.atk and Cfg.Threat then color = Cfg.ThreatColor end
-
-			if dist > Cfg.ESPMax then
-				hideAll(o)
-				radarDot(o, r, myRoot, color)
-				continue
+			local parts = {}
+			if Cfg.Distance then parts[#parts + 1] = math.floor(dist) .. "m" end
+			if Cfg.Weapon then
+				local t = toolOf(c)
+				if t then parts[#parts + 1] = t.Name end
 			end
+			P(o.info, "Text", table.concat(parts, " | "))
+			P(o.info, "Size", math.max(ts - 1, 9))
+			P(o.info, "Position", Vector2.new(top.X, y + height + 2))
+			P(o.info, "Visible", #parts > 0)
 
-			-- chams
-			if Cfg.Chams then
-				if not o.hl or o.hl.Parent == nil or o.hl.Adornee ~= c then
-					if o.hl then o.hl:Destroy() end
-					local hl = Instance.new("Highlight")
-					hl.Name = "FurinaChams"
-					hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-					hl.Adornee = c
-					hl.Parent = c
-					o.hl = hl
-				end
-				if hlColors[o.hl] ~= color then
-					hlColors[o.hl] = color
-					o.hl.FillColor = color
-					o.hl.OutlineColor = color
-				end
-				local fill = Cfg.ChamsFill / 100
-				if hlFills[o.hl] ~= fill then
-					hlFills[o.hl] = fill
-					o.hl.FillTransparency = fill
-				end
-				if not o.hl.Enabled then o.hl.Enabled = true end
-			elseif o.hl then
-				o.hl.Enabled = false
-			end
-
-			local top, topOn = Camera:WorldToViewportPoint(r.Position + Vector3.new(0, 2.9, 0))
-			local bot = Camera:WorldToViewportPoint(r.Position - Vector3.new(0, 3.1, 0))
-			local rp = Camera:WorldToViewportPoint(r.Position)
-
-			if not topOn or top.Z <= 0 then
-				hideAll(o)
-				if o.hl and Cfg.Chams then o.hl.Enabled = true end
-				if Cfg.Arrows then
-					local center = vp / 2
-					local v = Vector2.new(rp.X, rp.Y) - center
-					if rp.Z < 0 then v = -v end
-					if v.Magnitude < 1 then v = Vector2.new(0, 1) end
-					local dir = v.Unit
-					local perp = Vector2.new(-dir.Y, dir.X)
-					local pos = center + dir * math.min(vp.X, vp.Y) * 0.38
-					P(o.arrow, "PointA", pos + dir * 14)
-					P(o.arrow, "PointB", pos - dir * 6 + perp * 9)
-					P(o.arrow, "PointC", pos - dir * 6 - perp * 9)
-					P(o.arrow, "Color", color)
-					P(o.arrow, "Visible", true)
-					P(o.arrowTxt, "Text", math.floor(dist) .. "m")
-					P(o.arrowTxt, "Position", pos + dir * 28 - Vector2.new(0, 6))
-					P(o.arrowTxt, "Color", color)
-					P(o.arrowTxt, "Visible", true)
-				end
-			else
-				P(o.arrow, "Visible", false)
-				P(o.arrowTxt, "Visible", false)
-
-				local height = math.abs(bot.Y - top.Y)
-				local width = height * 0.55
-				local x, y = top.X - width / 2, top.Y
-				local pos, size = Vector2.new(x, y), Vector2.new(width, height)
-				local thick = Cfg.BoxThick
-				local full = Cfg.Box and Cfg.BoxStyle == "Full"
-				local corners = Cfg.Box and Cfg.BoxStyle ~= "Full"
-
-				P(o.boxOut, "Position", pos) P(o.boxOut, "Size", size) P(o.boxOut, "Thickness", thick + 2) P(o.boxOut, "Visible", full)
-				P(o.box, "Position", pos) P(o.box, "Size", size) P(o.box, "Color", color) P(o.box, "Thickness", thick) P(o.box, "Visible", full)
-				P(o.fill, "Position", pos) P(o.fill, "Size", size) P(o.fill, "Color", color) P(o.fill, "Visible", Cfg.BoxFill)
-				setCorners(o, x, y, width, height, color, thick, corners)
-
-				-- health bar and number
-				local frac = math.clamp(h.Health / math.max(h.MaxHealth, 1), 0, 1)
-				local bx = x - 5 - thick
-				P(o.hpBack, "From", Vector2.new(bx, y + height + 1)) P(o.hpBack, "To", Vector2.new(bx, y - 1)) P(o.hpBack, "Visible", Cfg.Health)
-				P(o.hp, "From", Vector2.new(bx, y + height)) P(o.hp, "To", Vector2.new(bx, y + height - height * frac))
-				P(o.hp, "Color", Color3.fromHSV(frac * 0.33, 1, 1)) P(o.hp, "Visible", Cfg.Health)
-				P(o.hpTxt, "Text", tostring(math.floor(h.Health)))
-				P(o.hpTxt, "Position", Vector2.new(bx - 13, y + height - height * frac - 6))
-				P(o.hpTxt, "Visible", Cfg.Health and Cfg.HPText)
-
-				-- text, scaled down with distance
-				local ts = math.clamp(Cfg.TextSize * (1.2 - dist / math.max(Cfg.ESPMax, 1) * 0.5), 9, 22)
-				P(o.name, "Text", plr.DisplayName)
-				P(o.name, "Size", ts)
-				P(o.name, "Position", Vector2.new(top.X, y - ts - 4))
-				P(o.name, "Color", color)
-				P(o.name, "Visible", Cfg.Name)
-
-				if o.atk and Cfg.Threat then
-					P(o.flag, "Text", "!! ATTACKING !!") P(o.flag, "Color", Cfg.ThreatColor)
-					P(o.flag, "Position", Vector2.new(top.X, y - ts * 2 - 8)) P(o.flag, "Size", ts) P(o.flag, "Visible", true)
-				elseif plr == target and Cfg.TargetTag then
-					P(o.flag, "Text", "TARGET") P(o.flag, "Color", Cfg.TargetColor)
-					P(o.flag, "Position", Vector2.new(top.X, y - ts * 2 - 8)) P(o.flag, "Size", ts) P(o.flag, "Visible", true)
-				else
-					P(o.flag, "Visible", false)
-				end
-
-				local parts = {}
-				if Cfg.Distance then parts[#parts + 1] = math.floor(dist) .. "m" end
-				if Cfg.Weapon then
-					local t = toolOf(c)
-					if t then parts[#parts + 1] = t.Name end
-				end
-				P(o.info, "Text", table.concat(parts, " | "))
-				P(o.info, "Size", math.max(ts - 1, 9))
-				P(o.info, "Position", Vector2.new(top.X, y + height + 2))
-				P(o.info, "Visible", #parts > 0)
-
-				-- skeleton
-				local nBones = 0
-				if Cfg.Skeleton and dist <= Cfg.SkelDist then
-					local bones = c:FindFirstChild("Torso") and BONES_R6 or BONES_R15
-					nBones = #bones
-					for i, pair in ipairs(bones) do
-						local ln = o.bones[i]
-						local a, b = c:FindFirstChild(pair[1]), c:FindFirstChild(pair[2])
-						local shown = false
-						if a and b then
-							local pa = Camera:WorldToViewportPoint(a.Position)
-							local pb = Camera:WorldToViewportPoint(b.Position)
-							if pa.Z > 0 and pb.Z > 0 then
-								P(ln, "From", Vector2.new(pa.X, pa.Y))
-								P(ln, "To", Vector2.new(pb.X, pb.Y))
-								P(ln, "Color", color)
-								shown = true
-							end
+			-- skeleton
+			local nBones = 0
+			if Cfg.Skeleton and dist <= Cfg.SkelDist then
+				local bones = c:FindFirstChild("Torso") and BONES_R6 or BONES_R15
+				nBones = #bones
+				for i, pair in ipairs(bones) do
+					local ln = o.bones[i]
+					local a, b = c:FindFirstChild(pair[1]), c:FindFirstChild(pair[2])
+					local shown = false
+					if a and b then
+						local pa, pb = proj(a), proj(b)
+						if pa.Z > 0 and pb.Z > 0 then
+							P(ln, "From", Vector2.new(pa.X, pa.Y))
+							P(ln, "To", Vector2.new(pb.X, pb.Y))
+							P(ln, "Color", color)
+							shown = true
 						end
-						P(ln, "Visible", shown)
 					end
+					P(ln, "Visible", shown)
 				end
-				for i = nBones + 1, 14 do P(o.bones[i], "Visible", false) end
+			end
+			for i = nBones + 1, 14 do P(o.bones[i], "Visible", false) end
 
-				-- head dot and look direction
-				local head = c:FindFirstChild("Head")
-				if head and (Cfg.HeadDot or Cfg.LookLine) then
-					local hp2, hOn = Camera:WorldToViewportPoint(head.Position)
-					if hOn and hp2.Z > 0 then
-						P(o.headDot, "Position", Vector2.new(hp2.X, hp2.Y))
-						P(o.headDot, "Radius", math.clamp(height * 0.09, 2, 14))
-						P(o.headDot, "Color", color)
-						P(o.headDot, "Visible", Cfg.HeadDot)
-						if Cfg.LookLine then
-							local tip = Camera:WorldToViewportPoint(head.Position + head.CFrame.LookVector * 5)
-							P(o.look, "From", Vector2.new(hp2.X, hp2.Y))
-							P(o.look, "To", Vector2.new(tip.X, tip.Y))
-							P(o.look, "Color", color)
-							P(o.look, "Visible", tip.Z > 0)
-						else
-							P(o.look, "Visible", false)
-						end
+			-- head dot and look direction
+			local head = c:FindFirstChild("Head")
+			if head and (Cfg.HeadDot or Cfg.LookLine) then
+				local hp2 = proj(head)
+				if hp2.Z > 0 then
+					P(o.headDot, "Position", Vector2.new(hp2.X, hp2.Y))
+					P(o.headDot, "Radius", math.clamp(height * 0.09, 2, 14))
+					P(o.headDot, "Color", color)
+					P(o.headDot, "Visible", Cfg.HeadDot)
+					if Cfg.LookLine then
+						local tip = Camera:WorldToViewportPoint(head.Position + head.CFrame.LookVector * 5)
+						P(o.look, "From", Vector2.new(hp2.X, hp2.Y))
+						P(o.look, "To", Vector2.new(tip.X, tip.Y))
+						P(o.look, "Color", color)
+						P(o.look, "Visible", tip.Z > 0)
 					else
-						P(o.headDot, "Visible", false)
 						P(o.look, "Visible", false)
 					end
 				else
 					P(o.headDot, "Visible", false)
 					P(o.look, "Visible", false)
 				end
-			end
-
-			-- tracer
-			if Cfg.Tracers and rp.Z > 0 then
-				local from
-				if Cfg.TracerOrigin == "Center" then
-					from = vp / 2
-				elseif Cfg.TracerOrigin == "Mouse" then
-					from = UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
-				else
-					from = Vector2.new(vp.X / 2, vp.Y)
-				end
-				P(o.tracer, "From", from)
-				P(o.tracer, "To", Vector2.new(rp.X, rp.Y))
-				P(o.tracer, "Color", color)
-				P(o.tracer, "Visible", true)
 			else
-				P(o.tracer, "Visible", false)
+				P(o.headDot, "Visible", false)
+				P(o.look, "Visible", false)
 			end
-
-			radarDot(o, r, myRoot, color)
 		end
+
+		-- tracer
+		if Cfg.Tracers and rp.Z > 0 then
+			local from
+			if Cfg.TracerOrigin == "Center" then
+				from = vp / 2
+			elseif Cfg.TracerOrigin == "Mouse" then
+				from = UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
+			else
+				from = Vector2.new(vp.X / 2, vp.Y)
+			end
+			P(o.tracer, "From", from)
+			P(o.tracer, "To", Vector2.new(rp.X, rp.Y))
+			P(o.tracer, "Color", color)
+			P(o.tracer, "Visible", true)
+		else
+			P(o.tracer, "Visible", false)
+		end
+
+		radarDot(o, r, myRoot, color)
+	end
+
+	-- players that no longer have a character this frame
+	for _, o in pairs(esp) do
+		if o.seen ~= frameId then hideAll(o) end
 	end
 end
 
--- chest ESP (gacha chests carry the "GachaChest" tag) ---------------------------------------
+-- chest ESP (gacha chests carry the "GachaChest" tag) -----------------------------------------------
 local chestDraw = {} -- [Instance] = Text
 local chestList, chestClock = {}, 0
-local function hideChests()
-	for _, t in pairs(chestDraw) do P(t, "Visible", false) end
-end
 local function renderChests()
-	if not Cfg.ChestESP then hideChests() return end
+	if not Cfg.ChestESP then
+		for _, t in pairs(chestDraw) do P(t, "Visible", false) end
+		return
+	end
 	local now = os.clock()
 	if now - chestClock > 3 then
 		chestClock = now
@@ -728,6 +830,16 @@ local function renderChests()
 	end
 end
 
+-- ESP runs at most 60 times a second; faster machines skip the extra frames
+local espAcc = 0
+onRender("esp", function(dt)
+	espAcc += dt
+	if espAcc < 1 / 60 then return end
+	espAcc = 0
+	renderESP()
+	renderChests()
+end)
+
 connect(Players.PlayerRemoving, removeESP)
 cleanup(removeAllESP)
 cleanup(function()
@@ -738,13 +850,44 @@ cleanup(function()
 	end
 end)
 
--- Combat: kill aura ---------------------------------------------------------
+------------------------------------------------------------------------------------------------------
+-- 8. Combat
+------------------------------------------------------------------------------------------------------
+-- wrap one method of a game class; every instance shares the class table, so live objects are covered too
+local function patchClass(getModule, method, wrap)
+	local ok, class = pcall(getModule)
+	if ok and type(class) == "table" and type(class[method]) == "function" then
+		local orig = class[method]
+		class[method] = wrap(orig)
+		cleanup(function() class[method] = orig end)
+	end
+end
+
+-- No attack cooldown: AttackController._onCooldown gates every swing (tick() < nextAttackTime)
+patchClass(function()
+	return require(RS.Modules.ClientGameHandler.ClientCombatHandler.CombatControllers.AttackController)
+end, "_onCooldown", function(orig)
+	return function(self)
+		if Cfg.NoCD then return tick() < (self.lastAttackTime or 0) + Cfg.NoCDDelay end
+		return orig(self)
+	end
+end)
+
+-- Anti slow: SpeedController multiplies WalkSpeed by named modifiers (e.g. "AttackSlow"); store them as 1
+patchClass(function()
+	return require(RS.Modules.ClientGameHandler.ClientCombatHandler.CombatControllers.CharacterController.SpeedController)
+end, "addModifier", function(orig)
+	return function(self, name, mult)
+		if Cfg.AntiSlow and type(mult) == "number" and mult < 1 then mult = 1 end
+		return orig(self, name, mult)
+	end
+end)
+
+-- Kill aura ---------------------------------------------------------------------------------------
 local Defs = RS:FindFirstChild("Modules") and RS.Modules.Data.Constants.WeaponData.WeaponDefinitions
-local capturedData -- weaponData table seen from a real swing (best template)
-local cycle = 0
-local lastHit = "none yet"
-local hitsSent = 0
-local lastTargets = 0
+local capturedData -- weaponData seen from a real swing (best template)
+local cycle, lastHit, hitsSent, lastTargets = 0, "none yet", 0, 0
+local inflight, MAX_INFLIGHT = 0, 4 -- swings sent but not yet answered
 
 local function buildWeaponData(tool)
 	if not tool or not Defs then return end
@@ -762,8 +905,7 @@ local function buildWeaponData(tool)
 	local off = tool:GetAttribute("Base_Hitbox_Offset") or zero
 	local kb = tool:GetAttribute("Base_Knockback") or 50
 	local lkb = tool:GetAttribute("Lunge_Knockback") or 0
-
-	local d = {
+	return {
 		tool = tool,
 		weaponDefinition = def,
 		attackCycleData = v1,
@@ -781,7 +923,6 @@ local function buildWeaponData(tool)
 		shouldLock = tool:GetAttribute("Should_Lock"),
 		isCritical = false,
 	}
-	return d
 end
 
 local function weaponDataFor(tool)
@@ -793,11 +934,12 @@ local function weaponDataFor(tool)
 	return buildWeaponData(tool)
 end
 
-if STATE and STATE.namecallHook then
+-- watch the game's own swings: keep the packet as a template, optionally report a bigger hitbox
+if STATE.namecallHook then
 	STATE.namecallHook("InvokeServer", function(self, method, ...)
 		local a1, a2 = ...
 		if a1 == "AttemptWeaponHit" and type(a2) == "table" and a2.tool then
-			capturedData = table.clone(a2) -- keep the unmodified template
+			capturedData = table.clone(a2)
 			if Cfg.Hitbox and Cfg.SpoofHitbox and typeof(a2.hitboxSize) == "Vector3" then
 				pcall(function() a2.hitboxSize = a2.hitboxSize * Cfg.HitboxMult end)
 			end
@@ -806,10 +948,8 @@ if STATE and STATE.namecallHook then
 end
 
 local function attackOnce()
-	local c, myRoot = char(), root()
-	if not c or not myRoot then return end
-	local h = hum()
-	if not h or h.Health <= 0 then return end
+	local c, myRoot, h = char(), root(), hum()
+	if not c or not myRoot or not h or h.Health <= 0 then return end
 
 	local tool = toolOf(c)
 	if not tool then
@@ -821,20 +961,15 @@ local function attackOnce()
 	end
 	if tool:GetAttribute("Tool_Type") ~= "Weapon" then return end
 
-	-- gather targets
+	local pos = myRoot.Position
 	local list = {}
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local ec, _, er = validEnemy(plr)
-		if ec and not (Cfg.SkipFF and ec:FindFirstChildOfClass("ForceField"))
-			and not Cfg.Ignore[plr.Name:lower()] and not Cfg.Ignore[plr.DisplayName:lower()] then
-			local d = (er.Position - myRoot.Position).Magnitude
-			if d <= Cfg.AuraRange then
-				local eh = ec:FindFirstChildOfClass("Humanoid")
-				list[#list + 1] = { model = ec, root = er, dist = d, hp = eh and eh.Health or 100 }
-			end
+	for _, e in ipairs(getEnemies()) do
+		if isLive(e) and not (Cfg.SkipFF and e.c:FindFirstChildOfClass("ForceField")) and not isIgnored(e.plr) then
+			local d = (e.r.Position - pos).Magnitude
+			if d <= Cfg.AuraRange then list[#list + 1] = { model = e.c, root = e.r, dist = d, hp = e.h.Health } end
 		end
 	end
-	if #list == 0 then return end
+	if #list == 0 then lastTargets = 0 return end
 	if Cfg.LowHPFirst then
 		table.sort(list, function(x, y) return x.hp < y.hp end)
 	else
@@ -846,71 +981,57 @@ local function attackOnce()
 
 	if Cfg.FaceTarget then
 		local p = list[1].root.Position
-		myRoot.CFrame = CFrame.lookAt(myRoot.Position, Vector3.new(p.X, myRoot.Position.Y, p.Z))
+		myRoot.CFrame = CFrame.lookAt(pos, Vector3.new(p.X, pos.Y, p.Z))
 	end
 
 	local data = weaponDataFor(tool)
 	if not data then return end
-
 	local hits = {}
 	for i, t in ipairs(list) do
-		local v = t.root.Position - myRoot.Position
-		hits[#hits + 1] = {
+		local v = t.root.Position - pos
+		hits[i] = {
 			enemyModel = t.model,
 			isClosestEnemy = i == 1,
-			origin = myRoot.Position,
+			origin = pos,
 			distance = t.dist,
 			direction = t.dist > 0 and v.Unit or Vector3.zero,
 			knockback = data.knockback,
 		}
 	end
 
-	local ok, res = pcall(function()
-		return RS.Events.GameRemoteFunction:InvokeServer("AttemptWeaponHit", data, hits)
-	end)
+	-- the server can take seconds to answer, so the call runs in its own thread instead of stalling the loop
 	hitsSent += 1
-	lastHit = ok and ("sent " .. #hits .. " target(s), reply " .. tostring(res)) or ("error " .. tostring(res))
+	inflight += 1
+	local n = #hits
+	task.spawn(function()
+		local ok, res = pcall(function()
+			return RS.Events.GameRemoteFunction:InvokeServer("AttemptWeaponHit", data, hits)
+		end)
+		inflight -= 1
+		lastHit = ok and ("sent " .. n .. " target(s), reply " .. tostring(res)) or ("error " .. tostring(res))
+	end)
 end
 
-task.spawn(function()
-	while alive() do
-		if Cfg.Aura then
-			local ok, err = pcall(attackOnce)
-			if not ok then lastHit = "error " .. tostring(err) end
-			task.wait(math.max(Cfg.AuraDelay, 0.03))
-		else
-			task.wait(0.2)
-		end
-	end
+-- at most MAX_INFLIGHT unanswered swings at once, so a slow server cannot be flooded
+every("aura", function() return math.max(Cfg.AuraDelay, 0.03) end, function()
+	if Cfg.Aura and inflight < MAX_INFLIGHT then attackOnce() end
 end)
 
--- Stick behind nearest target
-connect(RunService.Heartbeat, function()
-	if not alive() or not Cfg.Stick then return end
+-- stick behind the nearest enemy
+onFrame("stick", function()
+	if not Cfg.Stick then return end
 	local myRoot = root()
-	local plr = closestEnemy(Cfg.AuraRange + 40)
-	if not myRoot or not plr then return end
-	local r = plr.Character.HumanoidRootPart
-	myRoot.CFrame = r.CFrame * CFrame.new(0, 0, Cfg.StickDist)
+	local e = closest(Cfg.AuraRange + 40)
+	if myRoot and e then myRoot.CFrame = e.r.CFrame * CFrame.new(0, 0, Cfg.StickDist) end
 end)
 
--- UI toggle registry (so keybinds / auto-stop can flip the visible switch) ---
-local Toggles = {}
-local function setToggle(key, v)
-	Cfg[key] = v
-	local t = Toggles[key]
-	if t then pcall(function() t:Set(v) end) end
-end
-
--- Hitbox expander -------------------------------------------------------------
--- The game clones Assets.Parts.HitboxPart into HumanoidRootPart on each swing and
--- runs workspace:GetPartBoundsInBox on its CFrame/Size when the animation marker fires.
-connect(RunService.Heartbeat, function()
-	if not alive() then return end
+-- Hitbox expander: the game clones Assets.Parts.HitboxPart into HumanoidRootPart on each swing and runs
+-- workspace:GetPartBoundsInBox on its CFrame/Size when the animation marker fires
+onFrame("hitbox", function()
+	if not Cfg.Hitbox then return end
 	local r = root()
 	local part = r and r:FindFirstChild("HitboxPart")
-	if not part or not part:IsA("BasePart") then return end
-	if Cfg.Hitbox and not part:GetAttribute("FurinaBoost") then
+	if part and part:IsA("BasePart") and not part:GetAttribute("FurinaBoost") then
 		part:SetAttribute("FurinaBoost", true)
 		part.Size = part.Size * Cfg.HitboxMult
 		if Cfg.ShowHitbox then
@@ -921,195 +1042,56 @@ connect(RunService.Heartbeat, function()
 	end
 end)
 
--- Gacha auto roll ---------------------------------------------------------------
-local roll = { count = 0, last = "idle", best = 0 }
-task.spawn(function()
-	while alive() do
-		if Cfg.Rolling then
-			local ok, res = pcall(function()
-				return RS.Events.GameRemoteFunction:InvokeServer("AttemptRollGachaChest", Cfg.ChestType)
-			end)
-			roll.count += 1
-			if not ok then
-				roll.last = "error: " .. tostring(res)
-				setToggle("Rolling", false)
-			elseif type(res) ~= "table" then
-				roll.last = "unexpected reply: " .. tostring(res)
-				setToggle("Rolling", false)
-			elseif res.code == "NOT_ENOUGH_CURRENCY" then
-				roll.last = "out of currency"
-				setToggle("Rolling", false)
-				Luna:Notification({ Title = "Auto Roll", Content = "Not enough currency. Stopped.", Icon = "warning", ImageSource = "Material" })
-			else
-				local rw = res.reward
-				local rar = rw and rw.rarityInt
-				roll.last = tostring(res.code) .. (rar and (" | rarity " .. rar) or "")
-				if rar and rar > roll.best then roll.best = rar end
-				if rar and rar >= Cfg.StopRarity then
-					setToggle("Rolling", false)
-					Luna:Notification({ Title = "Auto Roll", Content = "Hit rarity " .. rar .. ". Stopped.", Icon = "stars", ImageSource = "Material" })
-				elseif roll.count >= Cfg.MaxRolls then
-					setToggle("Rolling", false)
-				end
-			end
-			task.wait(math.max(Cfg.RollDelay, 0.3))
-		else
-			task.wait(0.25)
-		end
-	end
-end)
-
--- HUD ---------------------------------------------------------------------------
-local hud = newDraw("Text", { Size = 14, Outline = true, Color = Color3.fromRGB(170, 200, 255), Position = Vector2.new(12, 12), Visible = false })
-local fpsAcc, fpsN, fps = 0, 0, 60
-connect(RunService.RenderStepped, function(dt)
-	if not alive() then return end
-	fpsAcc += dt fpsN += 1
-	if fpsAcc >= 0.5 then fps = math.floor(fpsN / fpsAcc) fpsAcc, fpsN = 0, 0 end
-	hud.Visible = Cfg.HUD
-	if Cfg.HUD and fpsN == 0 then -- rebuild the string only when the fps counter ticks (2x/second)
-		hud.Text = string.format("Furina Hub | %d fps | Aura %s (%d in range, %d sent) | Rolls %d",
-			fps, Cfg.Aura and "ON" or "off", lastTargets, hitsSent, roll.count)
-	end
-end)
-
--- Proximity alert ---------------------------------------------------------------------
--- In a game about hidden players, a number on screen telling you who is close is the most useful ESP.
-local alertText = newDraw("Text", { Size = 18, Center = true, Outline = true, Color = Color3.fromRGB(255, 90, 90), Visible = false })
-local alertAcc = 0
-connect(RunService.RenderStepped, function(dt)
-	if not alive() then return end
-	alertAcc += dt
-	if alertAcc < 0.2 then return end
-	alertAcc = 0
-	if not Cfg.Alert then alertText.Visible = false return end
-	local plr, d = closestEnemy(Cfg.AlertRange)
-	if plr then
-		local vp = Camera.ViewportSize
-		alertText.Text = string.format("%s  %dm", plr.DisplayName, math.floor(d))
-		alertText.Position = Vector2.new(vp.X / 2, vp.Y * 0.14)
-		alertText.Visible = true
-	else
-		alertText.Visible = false
-	end
-end)
-
--- Auto dodge (experimental) --------------------------------------------------------------
--- Watches enemies inside DodgeRange. If one is playing an animation that lives in an "Attack"
--- folder (how this game's weapons store their swings) and is facing you, sidestep.
+-- Auto dodge (experimental): sidestep when a nearby enemy facing you starts an "Attack" animation
 local lastDodge = 0
-task.spawn(function()
-	while alive() do
-		task.wait(0.05)
-		if Cfg.Dodge then
-			local myRoot, h = root(), hum()
-			if myRoot and h and h.Health > 0 and os.clock() - lastDodge > 0.6 then
-				for _, plr in ipairs(Players:GetPlayers()) do
-					local c, _, r = validEnemy(plr)
-					if c and (r.Position - myRoot.Position).Magnitude <= Cfg.DodgeRange then
-						local toMe = myRoot.Position - r.Position
-						local facing = toMe.Magnitude > 0 and r.CFrame.LookVector:Dot(toMe.Unit) or 0
-						local animator = c:FindFirstChildWhichIsA("Animator", true)
-						local attacking = false
-						if animator and facing > 0.3 then
-							for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
-								local a = tr.Animation
-								if a and a.Parent and a.Parent.Name == "Attack" and tr.TimePosition < 0.4 then
-									attacking = true
-									break
-								end
-							end
-						end
-						if attacking then
-							lastDodge = os.clock()
-							local side = toMe.Unit:Cross(Vector3.yAxis)
-							if math.random() < 0.5 then side = -side end
-							pcall(function() myRoot.CFrame = myRoot.CFrame + side * Cfg.DodgeDist end)
-							break
-						end
-					end
+every("dodge", 0.05, function()
+	if not Cfg.Dodge then return end
+	local myRoot, h = root(), hum()
+	if not myRoot or not h or h.Health <= 0 or os.clock() - lastDodge < 0.6 then return end
+	local pos = myRoot.Position
+	for _, e in ipairs(getEnemies()) do
+		if isLive(e) and (e.r.Position - pos).Magnitude <= Cfg.DodgeRange then
+			local toMe = pos - e.r.Position
+			if toMe.Magnitude > 0 and e.r.CFrame.LookVector:Dot(toMe.Unit) > 0.3 then
+				local animator = e.animator
+				if not animator or animator.Parent == nil then
+					animator = e.c:FindFirstChildWhichIsA("Animator", true)
+					e.animator = animator
+				end
+				if animator and isAttacking(animator, 0.4) then
+					lastDodge = os.clock()
+					local side = toMe.Unit:Cross(Vector3.yAxis)
+					if math.random() < 0.5 then side = -side end
+					myRoot.CFrame = myRoot.CFrame + side * Cfg.DodgeDist
+					break
 				end
 			end
 		end
 	end
 end)
 
--- Keybinds ----------------------------------------------------------------------
-connect(UserInputService.InputBegan, function(input, gp)
-	if gp or not alive() then return end
-	if input.KeyCode == Cfg.AuraKey then
-		setToggle("Aura", not Cfg.Aura)
-		Luna:Notification({ Title = "Kill Aura", Content = Cfg.Aura and "Enabled" or "Disabled", Icon = "gavel", ImageSource = "Material" })
-	elseif input.KeyCode == Cfg.ESPKey then
-		setToggle("ESP", not Cfg.ESP)
-	end
-end)
-
--- No attack cooldown ------------------------------------------------------------
--- AttackController._onCooldown gates every swing (tick() < nextAttackTime). The class table
--- is shared by every instance, so wrapping it applies to the live controller too.
-local patchedAC, origCooldown
-do
-	local ok, AC = pcall(function()
-		return require(RS.Modules.ClientGameHandler.ClientCombatHandler.CombatControllers.AttackController)
-	end)
-	if ok and type(AC) == "table" and type(AC._onCooldown) == "function" then
-		patchedAC, origCooldown = AC, AC._onCooldown
-		AC._onCooldown = function(self)
-			if Cfg.NoCD then
-				return tick() < (self.lastAttackTime or 0) + Cfg.NoCDDelay
-			end
-			return origCooldown(self)
-		end
-	end
-end
-cleanup(function()
-	if patchedAC and origCooldown then patchedAC._onCooldown = origCooldown end
-end)
-
--- Anti slow -----------------------------------------------------------------------
--- SpeedController multiplies WalkSpeed by named modifiers (e.g. "AttackSlow"). While
--- AntiSlow is on, any modifier below 1 is stored as 1 so it has no effect.
-local patchedSC, origAddMod
-do
-	local ok, SC = pcall(function()
-		return require(RS.Modules.ClientGameHandler.ClientCombatHandler.CombatControllers.CharacterController.SpeedController)
-	end)
-	if ok and type(SC) == "table" and type(SC.addModifier) == "function" then
-		patchedSC, origAddMod = SC, SC.addModifier
-		SC.addModifier = function(self, name, mult)
-			if Cfg.AntiSlow and type(mult) == "number" and mult < 1 then mult = 1 end
-			return origAddMod(self, name, mult)
-		end
-	end
-end
-cleanup(function()
-	if patchedSC and origAddMod then patchedSC.addModifier = origAddMod end
-end)
-
--- Aimlock -------------------------------------------------------------------
-local fovCircle = newDraw("Circle", { Thickness = 1, Filled = false, Color = Color3.new(1, 1, 1), Transparency = 0.8, Visible = false, Radius = 180 })
+-- Aimlock: runs at camera priority so it wins over the default camera script ------------------------
+local fovCircle = newDraw("Circle", { Thickness = 1, Filled = false, Color = WHITE, Transparency = 0.8, Visible = false, Radius = 180 })
 local function aimStep()
 	if not alive() then return end
-	local vp = Camera.ViewportSize
-	local center = vp / 2
-	fovCircle.Position = center
-	fovCircle.Radius = Cfg.AimFOV
-	fovCircle.Visible = Cfg.Aim and Cfg.ShowFOV
-	if not Cfg.Aim then return end
+	if not Cfg.Aim then
+		P(fovCircle, "Visible", false)
+		return
+	end
+	local center = Camera.ViewportSize / 2
+	P(fovCircle, "Position", center)
+	P(fovCircle, "Radius", Cfg.AimFOV)
+	P(fovCircle, "Visible", Cfg.ShowFOV)
 	if Cfg.AimHold and not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
 
 	local best, bestD
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local c = validEnemy(plr)
-		if c and not Cfg.Ignore[plr.Name:lower()] then
-			local part = c:FindFirstChild(Cfg.AimPart) or c:FindFirstChild("HumanoidRootPart")
-			if part then
-				local sp, on = Camera:WorldToViewportPoint(part.Position)
-				if on then
-					local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-					if d <= Cfg.AimFOV and (not bestD or d < bestD) then best, bestD = part, d end
-				end
+	for _, e in ipairs(getEnemies()) do
+		if isLive(e) and not Cfg.Ignore[e.plr.Name:lower()] then
+			local part = e.c:FindFirstChild(Cfg.AimPart) or e.r
+			local sp, on = Camera:WorldToViewportPoint(part.Position)
+			if on then
+				local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+				if d <= Cfg.AimFOV and (not bestD or d < bestD) then best, bestD = part, d end
 			end
 		end
 	end
@@ -1122,77 +1104,77 @@ pcall(function() RunService:UnbindFromRenderStep("FurinaAim") end)
 RunService:BindToRenderStep("FurinaAim", Enum.RenderPriority.Camera.Value + 1, aimStep)
 cleanup(function() pcall(function() RunService:UnbindFromRenderStep("FurinaAim") end) end)
 
--- Anti knockback + always-equip -----------------------------------------------
-connect(RunService.Heartbeat, function()
-	if not alive() then return end
-	local r, h = root(), hum()
-	if not r or not h then return end
-	if Cfg.AntiKB and not Cfg.Fly then
-		local v = r.AssemblyLinearVelocity
-		local horiz = Vector3.new(v.X, 0, v.Z)
-		local limit = math.max(h.WalkSpeed * 1.6, 30)
-		if horiz.Magnitude > limit then
-			r.AssemblyLinearVelocity = Vector3.new(0, v.Y, 0) + horiz.Unit * h.WalkSpeed
+------------------------------------------------------------------------------------------------------
+-- 9. Gacha, HUD, proximity alert
+------------------------------------------------------------------------------------------------------
+-- Auto roll: stops on the chosen rarity, a roll limit, or when you run out of currency
+local roll = { count = 0, last = "idle", best = 0 }
+local rollBusy = false
+every("roll", function() return math.max(Cfg.RollDelay, 0.3) end, function()
+	if not Cfg.Rolling or rollBusy then return end
+	rollBusy = true
+	task.spawn(function()
+		local ok, res = pcall(function()
+			return RS.Events.GameRemoteFunction:InvokeServer("AttemptRollGachaChest", Cfg.ChestType)
+		end)
+		roll.count += 1
+		if not ok then
+			roll.last = "error: " .. tostring(res)
+			setToggle("Rolling", false)
+		elseif type(res) ~= "table" then
+			roll.last = "unexpected reply: " .. tostring(res)
+			setToggle("Rolling", false)
+		elseif res.code == "NOT_ENOUGH_CURRENCY" then
+			roll.last = "out of currency"
+			setToggle("Rolling", false)
+			notify("Auto Roll", "Not enough currency. Stopped.", "warning")
+		else
+			local rar = res.reward and res.reward.rarityInt
+			roll.last = tostring(res.code) .. (rar and (" | rarity " .. rar) or "")
+			if rar and rar > roll.best then roll.best = rar end
+			if rar and rar >= Cfg.StopRarity then
+				setToggle("Rolling", false)
+				notify("Auto Roll", "Hit rarity " .. rar .. ". Stopped.", "stars")
+			elseif roll.count >= Cfg.MaxRolls then
+				setToggle("Rolling", false)
+			end
 		end
+		rollBusy = false
+	end)
+end)
+
+-- HUD text (rebuilt twice a second) and proximity alert (5 times a second)
+local hud = newDraw("Text", { Size = 14, Outline = true, Color = Color3.fromRGB(170, 200, 255), Position = Vector2.new(12, 12), Visible = false })
+local alertText = newDraw("Text", { Size = 18, Center = true, Outline = true, Color = Color3.fromRGB(255, 90, 90), Visible = false })
+local fpsAcc, fpsN, alertAcc = 0, 0, 0
+onRender("hud", function(dt)
+	fpsAcc += dt
+	fpsN += 1
+	if fpsAcc >= 0.5 then
+		P(hud, "Text", string.format("Furina Hub | %d fps | Aura %s (%d in range, %d sent) | Rolls %d",
+			math.floor(fpsN / fpsAcc), Cfg.Aura and "ON" or "off", lastTargets, hitsSent, roll.count))
+		fpsAcc, fpsN = 0, 0
 	end
-	if Cfg.AntiSlow and not Cfg.Speed and h.WalkSpeed < 16 and h.WalkSpeed > 0 then
-		h.WalkSpeed = 16 -- catches slows applied outside the SpeedController
-	end
-	if Cfg.AlwaysEquip and h.Health > 0 and not toolOf(char()) then
-		local t = LP.Backpack:FindFirstChildOfClass("Tool")
-		if t then h:EquipTool(t) end
+	P(hud, "Visible", Cfg.HUD)
+
+	alertAcc += dt
+	if alertAcc < 0.2 then return end
+	alertAcc = 0
+	local e, d = nil, nil
+	if Cfg.Alert then e, d = closest(Cfg.AlertRange) end
+	if e then
+		local vp = Camera.ViewportSize
+		P(alertText, "Text", string.format("%s  %dm", e.plr.DisplayName, math.floor(d)))
+		P(alertText, "Position", Vector2.new(vp.X / 2, vp.Y * 0.14))
+		P(alertText, "Visible", true)
+	else
+		P(alertText, "Visible", false)
 	end
 end)
 
--- Spectate / teleport helpers ---------------------------------------------------
-local function findPlayer(name)
-	name = tostring(name or ""):lower()
-	if name == "" then return end
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= LP and (p.Name:lower():find(name, 1, true) or p.DisplayName:lower():find(name, 1, true)) then return p end
-	end
-end
-local function stopSpectate()
-	local h = hum()
-	if h then Camera.CameraSubject = h end
-end
-cleanup(stopSpectate)
-
--- FPS boost ------------------------------------------------------------------------
--- Turns off particle emitters, beams, trails, smoke and fire (including new ones as they
--- spawn) and drops shadows. Everything it disables is remembered and restored.
-local boosted = {}
-local boostConn
-local FX = { ParticleEmitter = true, Beam = true, Trail = true, Smoke = true, Fire = true, Sparkles = true }
-local function boostOne(d)
-	if FX[d.ClassName] and d.Enabled then
-		boosted[d] = true
-		d.Enabled = false
-	end
-end
-local function setBoost(on)
-	if boostConn then boostConn:Disconnect() boostConn = nil end
-	if on then
-		task.spawn(function()
-			local n = 0
-			for _, d in ipairs(workspace:GetDescendants()) do
-				if not (Cfg.FPSBoost and alive()) then return end
-				boostOne(d)
-				n += 1
-				if n % 1500 == 0 then task.wait() end -- never block a frame
-			end
-		end)
-		boostConn = workspace.DescendantAdded:Connect(function(d) if alive() then boostOne(d) end end)
-		Lighting.GlobalShadows = false
-	else
-		for d in pairs(boosted) do pcall(function() d.Enabled = true end) end
-		table.clear(boosted)
-		Lighting.GlobalShadows = true
-	end
-end
-cleanup(function() setBoost(false) end)
-
--- Fullbright ----------------------------------------------------------------
+------------------------------------------------------------------------------------------------------
+-- 10. World: fullbright, FOV, FPS boost
+------------------------------------------------------------------------------------------------------
 local origLight = {
 	Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
 	FogEnd = Lighting.FogEnd, GlobalShadows = Lighting.GlobalShadows, Ambient = Lighting.Ambient,
@@ -1210,7 +1192,86 @@ local function applyLight(on)
 end
 cleanup(function() applyLight(false) end)
 
--- Fly -----------------------------------------------------------------------
+onRender("fov", function()
+	if Cfg.FOVOn and Camera.FieldOfView ~= Cfg.FOV then Camera.FieldOfView = Cfg.FOV end
+end)
+
+-- FPS boost: each part is optional and everything it changes is remembered and restored ---------------
+--   effects  : particles, beams, trails, smoke, fire, sparkles (including ones spawned later)
+--   post     : bloom, blur, sun rays, depth of field, color correction
+--   terrain  : grass decoration; quality: lowest render quality; shadows are dropped with the effects
+local FX_CLASSES = { ParticleEmitter = true, Beam = true, Trail = true, Smoke = true, Fire = true, Sparkles = true }
+local POST_CLASSES = { BloomEffect = true, BlurEffect = true, SunRaysEffect = true, DepthOfFieldEffect = true, ColorCorrectionEffect = true }
+local boostSaved = {} -- [Instance] = { property, original }
+local boostConn, boostMisc = nil, {}
+
+local function boostInstance(d)
+	local cn = d.ClassName
+	if Cfg.BoostFX and FX_CLASSES[cn] and d.Enabled then
+		boostSaved[d] = { "Enabled", true }
+		d.Enabled = false
+	end
+end
+
+local function setBoost(on)
+	-- always restore first so sub-option changes re-apply cleanly
+	if boostConn then boostConn:Disconnect() boostConn = nil end
+	for d, pair in pairs(boostSaved) do pcall(function() d[pair[1]] = pair[2] end) end
+	table.clear(boostSaved)
+	if boostMisc.shadows ~= nil then Lighting.GlobalShadows = boostMisc.shadows end
+	if boostMisc.deco ~= nil then pcall(function() workspace.Terrain.Decoration = boostMisc.deco end) end
+	if boostMisc.quality ~= nil then pcall(function() settings().Rendering.QualityLevel = boostMisc.quality end) end
+	boostMisc = {}
+	if not on then return end
+
+	if Cfg.BoostFX then
+		boostMisc.shadows = Lighting.GlobalShadows
+		Lighting.GlobalShadows = false
+		boostConn = workspace.DescendantAdded:Connect(function(d)
+			if FX_CLASSES[d.ClassName] and alive() then boostInstance(d) end
+		end)
+		task.spawn(function()
+			local n = 0
+			for _, d in ipairs(workspace:GetDescendants()) do
+				if not (Cfg.FPSBoost and alive()) then return end
+				boostInstance(d)
+				n += 1
+				if n % 1500 == 0 then task.wait() end -- never block a frame
+			end
+		end)
+	end
+	if Cfg.BoostPost then
+		for _, parent in ipairs({ Lighting, Camera }) do
+			for _, d in ipairs(parent:GetChildren()) do
+				if POST_CLASSES[d.ClassName] and d.Enabled then
+					boostSaved[d] = { "Enabled", true }
+					d.Enabled = false
+				end
+			end
+		end
+	end
+	if Cfg.BoostTerrain then
+		pcall(function()
+			boostMisc.deco = workspace.Terrain.Decoration
+			workspace.Terrain.Decoration = false
+		end)
+	end
+	if Cfg.BoostQuality then
+		pcall(function()
+			boostMisc.quality = settings().Rendering.QualityLevel
+			settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+		end)
+	end
+end
+cleanup(function() setBoost(false) end)
+
+local function applyFPSCap()
+	if setfpscap then pcall(setfpscap, Cfg.FPSCapOn and Cfg.FPSCap or 60) end
+end
+
+------------------------------------------------------------------------------------------------------
+-- 11. Movement
+------------------------------------------------------------------------------------------------------
 local flyBV, flyBG
 local function stopFly()
 	if flyBV then flyBV:Destroy() flyBV = nil end
@@ -1235,43 +1296,18 @@ local function startFly()
 end
 cleanup(stopFly)
 
--- Panic -----------------------------------------------------------------------
-local function panic()
-	for _, k in ipairs({ "Aura", "NoCD", "Aim", "Hitbox", "Stick", "FaceTarget", "Rolling", "ESP", "Fly", "Noclip", "Speed", "Jump", "Dodge", "AntiSlow", "AntiKB", "Fullbright", "FOVOn" }) do
-		setToggle(k, false)
-	end
-	stopFly()
-	applyLight(false)
-	Camera.FieldOfView = 70
-	local h = hum()
-	if h then h.WalkSpeed = 16 h.JumpPower = 38 end
-	Luna:Notification({ Title = "Panic", Content = "All features disabled.", Icon = "warning", ImageSource = "Material" })
-end
-connect(UserInputService.InputBegan, function(input, gp)
-	if not gp and alive() and input.KeyCode == Cfg.PanicKey then panic() end
-end)
-
--- Main loops -----------------------------------------------------------------
-local espAcc = 0
-connect(RunService.RenderStepped, function(dt)
-	if not alive() then return end
-	espAcc += dt
-	if espAcc >= 1 / 60 then -- 60 ESP updates a second is plenty; skips the rest on fast machines
-		espAcc = 0
-		renderESP()
-		renderChests()
-	end
-	if Cfg.FOVOn then Camera.FieldOfView = Cfg.FOV end
-end)
-
-connect(RunService.Heartbeat, function()
-	if not alive() then return end
+-- speed, jump, fly, anti knockback, anti slow floor; values are only written when they differ
+onFrame("movement", function()
 	local h, r = hum(), root()
-	if h then
-		if Cfg.Speed then h.WalkSpeed = Cfg.SpeedValue end
-		if Cfg.Jump then h.UseJumpPower = true h.JumpPower = Cfg.JumpValue end
+	if not h then return end
+	if Cfg.Speed and h.WalkSpeed ~= Cfg.SpeedValue then h.WalkSpeed = Cfg.SpeedValue end
+	if Cfg.Jump then
+		if not h.UseJumpPower then h.UseJumpPower = true end
+		if h.JumpPower ~= Cfg.JumpValue then h.JumpPower = Cfg.JumpValue end
 	end
-	if Cfg.Fly and r and flyBV and flyBG then
+	if not r then return end
+
+	if Cfg.Fly and flyBV and flyBG then
 		local dir, cf = Vector3.zero, Camera.CFrame
 		if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += cf.LookVector end
 		if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= cf.LookVector end
@@ -1282,15 +1318,36 @@ connect(RunService.Heartbeat, function()
 		flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * Cfg.FlySpeed or Vector3.zero
 		flyBG.CFrame = cf
 	end
+
+	if Cfg.AntiKB and not Cfg.Fly then
+		local v = r.AssemblyLinearVelocity
+		local horiz = Vector3.new(v.X, 0, v.Z)
+		if horiz.Magnitude > math.max(h.WalkSpeed * 1.6, 30) then
+			r.AssemblyLinearVelocity = Vector3.new(0, v.Y, 0) + horiz.Unit * h.WalkSpeed
+		end
+	end
+	if Cfg.AntiSlow and not Cfg.Speed and h.WalkSpeed < 16 and h.WalkSpeed > 0 then
+		h.WalkSpeed = 16 -- catches slows applied outside the SpeedController
+	end
 end)
 
+every("always-equip", 0.3, function()
+	if not Cfg.AlwaysEquip then return end
+	local h = hum()
+	if h and h.Health > 0 and not toolOf(char()) then
+		local t = LP.Backpack:FindFirstChildOfClass("Tool")
+		if t then h:EquipTool(t) end
+	end
+end)
+
+-- noclip needs the physics step; the part list is rescanned once a second, not every frame
 local ncParts, ncChar, ncClock = {}, nil, 0
 connect(RunService.Stepped, function()
-	if not alive() or not Cfg.Noclip then return end
+	if not Cfg.Noclip or not alive() then return end
 	local c = char()
 	if not c then return end
 	local now = os.clock()
-	if c ~= ncChar or now - ncClock > 1 then -- rescan parts once a second, not every frame
+	if c ~= ncChar or now - ncClock > 1 then
 		ncChar, ncClock = c, now
 		table.clear(ncParts)
 		for _, p in ipairs(c:GetDescendants()) do
@@ -1323,7 +1380,69 @@ connect(LP.CharacterAdded, function()
 	if Cfg.Fly then startFly() end
 end)
 
--- UI ---------------------------------------------------------------------------
+-- spectate / teleport helpers
+local function findPlayer(name)
+	name = tostring(name or ""):lower()
+	if name == "" then return end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LP and (p.Name:lower():find(name, 1, true) or p.DisplayName:lower():find(name, 1, true)) then return p end
+	end
+end
+local function stopSpectate()
+	local h = hum()
+	if h then Camera.CameraSubject = h end
+end
+cleanup(stopSpectate)
+
+------------------------------------------------------------------------------------------------------
+-- 12. Panic, keybinds, auto-save
+------------------------------------------------------------------------------------------------------
+local PANIC_OFF = { "Aura", "NoCD", "Aim", "Hitbox", "Stick", "FaceTarget", "Rolling", "ESP", "Fly", "Noclip",
+	"Speed", "Jump", "Dodge", "AntiSlow", "AntiKB", "Fullbright", "FOVOn" }
+local function panic()
+	for _, k in ipairs(PANIC_OFF) do setToggle(k, false) end
+	stopFly()
+	applyLight(false)
+	Camera.FieldOfView = 70
+	local h = hum()
+	if h then h.WalkSpeed = 16 h.JumpPower = 38 end
+	notify("Panic", "All features disabled.", "warning")
+end
+
+connect(UserInputService.InputBegan, function(input, gp)
+	if gp or not alive() then return end
+	local k = input.KeyCode
+	if k == Cfg.PanicKey then
+		panic()
+	elseif k == Cfg.AuraKey then
+		setToggle("Aura", not Cfg.Aura)
+		notify("Kill Aura", Cfg.Aura and "Enabled" or "Disabled", "gavel")
+	elseif k == Cfg.ESPKey then
+		setToggle("ESP", not Cfg.ESP)
+	end
+end)
+
+-- write when something changed (checked every 1.5s) and at least every 30s
+local lastSig, sinceForce, saveFailedNotified = signature(), 0, false
+every("autosave", 1.5, function()
+	sinceForce += 1.5
+	if not Cfg.AutoSave then return end
+	local sig = signature()
+	if sig ~= lastSig or sinceForce >= 30 then
+		local ok, err = saveCfg()
+		if ok then
+			lastSig, sinceForce, saveFailedNotified = sig, 0, false
+		elseif not saveFailedNotified then
+			saveFailedNotified = true
+			notify("Auto Save failed", tostring(err), "warning")
+		end
+	end
+end)
+cleanup(function() if Cfg.AutoSave then saveCfg() end end)
+
+------------------------------------------------------------------------------------------------------
+-- 13. UI
+------------------------------------------------------------------------------------------------------
 local Window = Luna:CreateWindow({
 	Name = "Furina Hub",
 	Subtitle = "Silent Assassins",
@@ -1335,27 +1454,46 @@ local Window = Luna:CreateWindow({
 cleanup(function() pcall(function() Luna:Destroy() end) end)
 
 local function tab(name, icon) return Window:CreateTab({ Name = name, Icon = icon, ImageSource = "Material", ShowTitle = true }) end
+local function head(t, text) t:CreateLabel({ Text = text, Style = 2 }) end
 local function tog(t, name, key, desc, cb)
-	Toggles[key] = t:CreateToggle({ Name = name, Description = desc, CurrentValue = Cfg[key], Callback = function(v) Cfg[key] = v if cb then cb(v) end end })
+	Toggles[key] = t:CreateToggle({
+		Name = name, Description = desc, CurrentValue = Cfg[key],
+		Callback = function(v) Cfg[key] = v if cb then cb(v) end end,
+	})
 end
-local Sliders = {} -- [key] = { obj, scale } so Load Config can move the sliders too
 -- scale lets a slider show whole numbers for a decimal setting (shown value = Cfg[key] * scale)
-local function sld(t, name, key, lo, hi, scale)
+local function sld(t, name, key, lo, hi, scale, cb)
 	scale = scale or 1
 	Sliders[key] = {
 		scale = scale,
 		obj = t:CreateSlider({
 			Name = name, Range = { lo, hi }, Increment = 1,
 			CurrentValue = math.clamp(math.floor(Cfg[key] * scale + 0.5), lo, hi),
-			Callback = function(v) Cfg[key] = v / scale end,
+			Callback = function(v) Cfg[key] = v / scale if cb then cb(v) end end,
 		}),
 	}
+end
+local function dd(t, name, key, options)
+	t:CreateDropdown({
+		Name = name, Options = options, CurrentOption = { Cfg[key] }, MultipleOptions = false,
+		Callback = function(o) Cfg[key] = type(o) == "table" and o[1] or o end,
+	})
+end
+local function bind(t, name, desc, key)
+	t:CreateBind({
+		Name = name, Description = desc, CurrentBind = Cfg[key].Name, Callback = function() end,
+		OnChangedCallback = function(k) if typeof(k) == "EnumItem" then Cfg[key] = k end end,
+	})
+end
+local function picker(t, name, key)
+	t:CreateColorPicker({ Name = name, Color = Cfg[key], Callback = function(c) Cfg[key] = c end })
 end
 local function refreshUI() -- push Cfg back into the visible toggles and sliders
 	for key, t in pairs(Toggles) do pcall(function() t:Set(Cfg[key]) end) end
 	for key, s in pairs(Sliders) do pcall(function() s.obj:Set(math.floor(Cfg[key] * s.scale + 0.5)) end) end
 end
 
+-- Combat ------------------------------------------------------------------------------------------
 local Combat = tab("Combat", "gavel")
 tog(Combat, "Kill Aura", "Aura", "Auto-hits every enemy in range with your equipped weapon")
 sld(Combat, "Aura Range", "AuraRange", 5, 150)
@@ -1367,98 +1505,32 @@ tog(Combat, "Auto Equip Weapon", "AutoEquip")
 tog(Combat, "Skip Forcefielded", "SkipFF")
 tog(Combat, "Lowest HP First", "LowHPFirst", "Prioritise weak targets instead of the nearest")
 sld(Combat, "Max Targets Per Swing", "MaxTargets", 1, 10)
-Combat:CreateBind({ Name = "Kill Aura Key", Description = "Press to toggle the aura", CurrentBind = Cfg.AuraKey.Name,
-	Callback = function() end,
-	OnChangedCallback = function(k) if typeof(k) == "EnumItem" then Cfg.AuraKey = k end end })
-Combat:CreateInput({ Name = "Ignore Players", Description = "Comma separated names the aura will never hit",
+bind(Combat, "Kill Aura Key", "Press to toggle the aura", "AuraKey")
+Combat:CreateInput({
+	Name = "Ignore Players", Description = "Comma separated names the aura will never hit",
 	PlaceholderText = "friend1, friend2", RemoveTextAfterFocusLost = false,
 	CurrentValue = (function() local n = {} for k in pairs(Cfg.Ignore) do n[#n + 1] = k end return table.concat(n, ", ") end)(),
 	Callback = function(text)
 		Cfg.Ignore = {}
 		for n in tostring(text):gmatch("[^,%s]+") do Cfg.Ignore[n:lower()] = true end
-	end })
+	end,
+})
 tog(Combat, "Face Target", "FaceTarget", "Turns you toward the closest enemy while attacking")
 tog(Combat, "Stick To Target", "Stick", "Teleports you behind the closest enemy every frame")
 sld(Combat, "Stick Distance", "StickDist", 2, 10)
 Combat:CreateButton({ Name = "Teleport To Nearest", Callback = function()
-	local plr = closestEnemy()
-	local myRoot = root()
-	if plr and myRoot then myRoot.CFrame = plr.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 4) end
+	local e, myRoot = closest(), root()
+	if e and myRoot then myRoot.CFrame = e.r.CFrame * CFrame.new(0, 0, 4) end
 end })
 Combat:CreateButton({ Name = "Aura Status", Description = "Shows the last attack result in a notification", Callback = function()
-	Luna:Notification({ Title = "Kill Aura", Content = "Sent " .. hitsSent .. " | last: " .. lastHit, Icon = "info", ImageSource = "Material" })
+	notify("Kill Aura", "Sent " .. hitsSent .. " | last: " .. lastHit)
 end })
 
-local Power = tab("Power", "bolt")
-tog(Power, "Aimlock", "Aim", "Smoothly turns the camera to the nearest enemy inside the circle")
-tog(Power, "Hold Right Mouse To Aim", "AimHold")
-tog(Power, "Show FOV Circle", "ShowFOV")
-sld(Power, "Aim FOV (px)", "AimFOV", 30, 600)
-sld(Power, "Aim Smoothness", "AimSmooth", 1, 20)
-Power:CreateButton({ Name = "Aim At: Head / Body (toggle)", Callback = function()
-	Cfg.AimPart = Cfg.AimPart == "Head" and "HumanoidRootPart" or "Head"
-	Luna:Notification({ Title = "Aimlock", Content = "Aiming at " .. Cfg.AimPart, Icon = "my_location", ImageSource = "Material" })
-end })
-tog(Power, "Auto Dodge (experimental)", "Dodge", "Sidesteps when a nearby enemy starts a swing at you. May not beat the server's timing")
-sld(Power, "Dodge Trigger Range", "DodgeRange", 6, 30)
-sld(Power, "Dodge Distance", "DodgeDist", 4, 16)
-tog(Power, "Proximity Alert", "Alert", "Shows the nearest enemy's name and distance near the top of the screen")
-sld(Power, "Alert Range", "AlertRange", 10, 200)
-tog(Power, "Anti Slow", "AntiSlow", "Stops swing and hit slowdowns from reducing your speed")
-tog(Power, "Anti Knockback", "AntiKB", "Cancels most of the knockback you take")
-tog(Power, "Always Hold Weapon", "AlwaysEquip", "Re-equips your weapon whenever it is put away")
-Power:CreateBind({ Name = "Panic Key", Description = "Turns every feature off at once", CurrentBind = Cfg.PanicKey.Name,
-	Callback = function() end,
-	OnChangedCallback = function(k) if typeof(k) == "EnumItem" then Cfg.PanicKey = k end end })
-Power:CreateButton({ Name = "Panic Now", Callback = function() panic() end })
-Power:CreateInput({ Name = "Player Name", Description = "Part of a player's name for the buttons below",
-	PlaceholderText = "name", CurrentValue = "", RemoveTextAfterFocusLost = false,
-	Callback = function(t) Cfg.TargetName = t end })
-Power:CreateButton({ Name = "Spectate Player", Callback = function()
-	local p = findPlayer(Cfg.TargetName)
-	local h = p and p.Character and p.Character:FindFirstChildOfClass("Humanoid")
-	if h then Camera.CameraSubject = h end
-end })
-Power:CreateButton({ Name = "Stop Spectating", Callback = stopSpectate })
-Power:CreateButton({ Name = "Teleport To Player", Callback = function()
-	local p = findPlayer(Cfg.TargetName)
-	local r, mine = p and p.Character and p.Character:FindFirstChild("HumanoidRootPart"), root()
-	if r and mine then mine.CFrame = r.CFrame * CFrame.new(0, 0, 4) end
-end })
-
-local Hit = tab("Hitbox", "crop_free")
-tog(Hit, "Bigger Hitbox", "Hitbox", "Enlarges your weapon hitbox on every swing")
-sld(Hit, "Hitbox Size (x)", "HitboxMult", 1, 10)
-tog(Hit, "Show Hitbox", "ShowHitbox", "Draws the swing box in red neon")
-tog(Hit, "Spoof Size To Server", "SpoofHitbox", "Also reports the bigger size in the hit packet. Riskier: the server sees a number that doesn't match your weapon")
-Hit:CreateLabel({ Text = "Hit detection runs on your client, so the bigger box really catches more enemies. Whether the server accepts far hits is unverified.", Style = 2 })
-
-local Luck = tab("Luck", "casino")
-Luck:CreateLabel({ Text = "Rolls are decided on the server, so luck itself cannot be raised from here. This tab rolls for you and stops on a rarity you choose.", Style = 3 })
-Luck:CreateLabel({ Text = "Odds by tier (common to best): Basic 76/18/5/1/0 %. Divine 0/70/25/4/1 %. Divine has far better odds per coin.", Style = 2 })
-Luck:CreateDropdown({ Name = "Chest", Options = { "Basic", "Divine" }, CurrentOption = { Cfg.ChestType }, MultipleOptions = false,
-	Callback = function(o) Cfg.ChestType = type(o) == "table" and o[1] or o end })
-tog(Luck, "Auto Roll", "Rolling", "Rolls the chest repeatedly. Spends your currency.")
-sld(Luck, "Stop At Rarity (1-5)", "StopRarity", 1, 5)
-sld(Luck, "Max Rolls", "MaxRolls", 1, 200)
-sld(Luck, "Roll Delay (x0.1s)", "RollDelay", 3, 40, 10)
-Luck:CreateButton({ Name = "Roll Status", Callback = function()
-	Luna:Notification({ Title = "Auto Roll", Content = "Rolls " .. roll.count .. " | best rarity " .. roll.best .. " | last: " .. roll.last, Icon = "info", ImageSource = "Material" })
-end })
-Luck:CreateButton({ Name = "Reset Roll Counter", Callback = function() roll.count = 0 roll.best = 0 end })
-
-local function dd(t, name, key, options)
-	t:CreateDropdown({ Name = name, Options = options, CurrentOption = { Cfg[key] }, MultipleOptions = false,
-		Callback = function(o) Cfg[key] = type(o) == "table" and o[1] or o end })
-end
-local function head(t, text) t:CreateLabel({ Text = text, Style = 2 }) end
-
+-- ESP -----------------------------------------------------------------------------------------------
 local ESPTab = tab("ESP", "visibility")
 head(ESPTab, "Master")
 tog(ESPTab, "Player ESP", "ESP", "Master switch for everything below (key: Z by default)")
-ESPTab:CreateBind({ Name = "ESP Key", Description = "Press to toggle ESP", CurrentBind = Cfg.ESPKey.Name,
-	Callback = function() end,
-	OnChangedCallback = function(k) if typeof(k) == "EnumItem" then Cfg.ESPKey = k end end })
+bind(ESPTab, "ESP Key", "Press to toggle ESP", "ESPKey")
 sld(ESPTab, "Max Distance", "ESPMax", 100, 5000)
 head(ESPTab, "Boxes")
 tog(ESPTab, "Boxes", "Box")
@@ -1494,17 +1566,79 @@ tog(ESPTab, "Chest ESP", "ChestESP", "Names and distances for gacha chests")
 head(ESPTab, "Colors")
 tog(ESPTab, "Rainbow", "Rainbow")
 tog(ESPTab, "Visible Color", "VisCheck", "Enemies in line of sight use the visible color")
-ESPTab:CreateColorPicker({ Name = "Base Color", Color = Cfg.ESPColor, Callback = function(c) Cfg.ESPColor = c end })
-ESPTab:CreateColorPicker({ Name = "Visible Color", Color = Cfg.VisColor, Callback = function(c) Cfg.VisColor = c end })
-ESPTab:CreateColorPicker({ Name = "Target Color", Color = Cfg.TargetColor, Callback = function(c) Cfg.TargetColor = c end })
-ESPTab:CreateColorPicker({ Name = "Attacking Color", Color = Cfg.ThreatColor, Callback = function(c) Cfg.ThreatColor = c end })
+picker(ESPTab, "Base Color", "ESPColor")
+picker(ESPTab, "Visible Color", "VisColor")
+picker(ESPTab, "Target Color", "TargetColor")
+picker(ESPTab, "Attacking Color", "ThreatColor")
 
+-- Power ---------------------------------------------------------------------------------------------
+local Power = tab("Power", "bolt")
+tog(Power, "Aimlock", "Aim", "Smoothly turns the camera to the nearest enemy inside the circle")
+tog(Power, "Hold Right Mouse To Aim", "AimHold")
+tog(Power, "Show FOV Circle", "ShowFOV")
+sld(Power, "Aim FOV (px)", "AimFOV", 30, 600)
+sld(Power, "Aim Smoothness", "AimSmooth", 1, 20)
+Power:CreateButton({ Name = "Aim At: Head / Body (toggle)", Callback = function()
+	Cfg.AimPart = Cfg.AimPart == "Head" and "HumanoidRootPart" or "Head"
+	notify("Aimlock", "Aiming at " .. Cfg.AimPart, "my_location")
+end })
+tog(Power, "Auto Dodge (experimental)", "Dodge", "Sidesteps when a nearby enemy starts a swing at you. May not beat the server's timing")
+sld(Power, "Dodge Trigger Range", "DodgeRange", 6, 30)
+sld(Power, "Dodge Distance", "DodgeDist", 4, 16)
+tog(Power, "Proximity Alert", "Alert", "Shows the nearest enemy's name and distance near the top of the screen")
+sld(Power, "Alert Range", "AlertRange", 10, 200)
+tog(Power, "Anti Slow", "AntiSlow", "Stops swing and hit slowdowns from reducing your speed")
+tog(Power, "Anti Knockback", "AntiKB", "Cancels most of the knockback you take")
+tog(Power, "Always Hold Weapon", "AlwaysEquip", "Re-equips your weapon whenever it is put away")
+bind(Power, "Panic Key", "Turns every feature off at once", "PanicKey")
+Power:CreateButton({ Name = "Panic Now", Callback = panic })
+Power:CreateInput({
+	Name = "Player Name", Description = "Part of a player's name for the buttons below",
+	PlaceholderText = "name", CurrentValue = "", RemoveTextAfterFocusLost = false,
+	Callback = function(t) Cfg.TargetName = t end,
+})
+Power:CreateButton({ Name = "Spectate Player", Callback = function()
+	local p = findPlayer(Cfg.TargetName)
+	local h = p and p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+	if h then Camera.CameraSubject = h end
+end })
+Power:CreateButton({ Name = "Stop Spectating", Callback = stopSpectate })
+Power:CreateButton({ Name = "Teleport To Player", Callback = function()
+	local p = findPlayer(Cfg.TargetName)
+	local r, mine = p and p.Character and p.Character:FindFirstChild("HumanoidRootPart"), root()
+	if r and mine then mine.CFrame = r.CFrame * CFrame.new(0, 0, 4) end
+end })
+
+-- Hitbox -------------------------------------------------------------------------------------------
+local Hit = tab("Hitbox", "crop_free")
+tog(Hit, "Bigger Hitbox", "Hitbox", "Enlarges your weapon hitbox on every swing")
+sld(Hit, "Hitbox Size (x)", "HitboxMult", 1, 10)
+tog(Hit, "Show Hitbox", "ShowHitbox", "Draws the swing box in red neon")
+tog(Hit, "Spoof Size To Server", "SpoofHitbox", "Also reports the bigger size in the hit packet. Riskier: the server sees a number that doesn't match your weapon")
+Hit:CreateLabel({ Text = "Hit detection runs on your client, so the bigger box really catches more enemies. Whether the server accepts far hits is unverified.", Style = 2 })
+
+-- Luck ----------------------------------------------------------------------------------------------
+local Luck = tab("Luck", "casino")
+Luck:CreateLabel({ Text = "Rolls are decided on the server, so luck itself cannot be raised from here. This tab rolls for you and stops on a rarity you choose.", Style = 3 })
+Luck:CreateLabel({ Text = "Odds by tier (common to best): Basic 76/18/5/1/0 %. Divine 0/70/25/4/1 %. Divine has far better odds per coin.", Style = 2 })
+dd(Luck, "Chest", "ChestType", { "Basic", "Divine" })
+tog(Luck, "Auto Roll", "Rolling", "Rolls the chest repeatedly. Spends your currency.")
+sld(Luck, "Stop At Rarity (1-5)", "StopRarity", 1, 5)
+sld(Luck, "Max Rolls", "MaxRolls", 1, 200)
+sld(Luck, "Roll Delay (x0.1s)", "RollDelay", 3, 40, 10)
+Luck:CreateButton({ Name = "Roll Status", Callback = function()
+	notify("Auto Roll", "Rolls " .. roll.count .. " | best rarity " .. roll.best .. " | last: " .. roll.last)
+end })
+Luck:CreateButton({ Name = "Reset Roll Counter", Callback = function() roll.count, roll.best = 0, 0 end })
+
+-- Visuals --------------------------------------------------------------------------------------------
 local Visuals = tab("Visuals", "palette")
 tog(Visuals, "HUD", "HUD", "Top-left status line")
 tog(Visuals, "Fullbright", "Fullbright", nil, applyLight)
 tog(Visuals, "Custom FOV", "FOVOn", nil, function(v) if not v then Camera.FieldOfView = 70 end end)
 sld(Visuals, "FOV", "FOV", 30, 120)
 
+-- Movement --------------------------------------------------------------------------------------------
 local Move = tab("Movement", "directions_run")
 tog(Move, "Speed", "Speed", nil, function(v) if not v then local h = hum() if h then h.WalkSpeed = 16 end end end)
 sld(Move, "Walk Speed", "SpeedValue", 16, 120)
@@ -1515,18 +1649,28 @@ tog(Move, "Noclip", "Noclip")
 tog(Move, "Fly", "Fly", "WASD + Space / Shift", function(v) if v then startFly() else stopFly() end end)
 sld(Move, "Fly Speed", "FlySpeed", 20, 200)
 
+-- Misc ---------------------------------------------------------------------------------------------------
 local Misc = tab("Misc", "settings")
-tog(Misc, "FPS Boost", "FPSBoost", "Disables particles, beams, trails and shadows to raise fps. Turn off to restore", setBoost)
-if Cfg.FPSBoost then setBoost(true) end
+local function reboost() if Cfg.FPSBoost then setBoost(true) end end
+head(Misc, "Performance")
+tog(Misc, "FPS Boost", "FPSBoost", "Master switch. Everything it changes is restored when you turn it off", setBoost)
+tog(Misc, "Remove Effects", "BoostFX", "Particles, beams, trails, smoke, fire and shadows", reboost)
+tog(Misc, "Remove Post Effects", "BoostPost", "Bloom, blur, sun rays, depth of field, color correction", reboost)
+tog(Misc, "Remove Terrain Grass", "BoostTerrain", nil, reboost)
+tog(Misc, "Lowest Render Quality", "BoostQuality", nil, reboost)
+tog(Misc, "Custom FPS Cap", "FPSCapOn", "Off puts the cap back to 60", applyFPSCap)
+sld(Misc, "FPS Cap", "FPSCap", 30, 360, 1, function() if Cfg.FPSCapOn then applyFPSCap() end end)
+head(Misc, "General")
 tog(Misc, "Anti AFK", "AntiAFK")
-local function notify(title, text, icon)
-	Luna:Notification({ Title = title, Content = text, Icon = icon or "info", ImageSource = "Material" })
-end
+
+head(Misc, "Config")
 tog(Misc, "Auto Save Config", "AutoSave", "Saves a moment after any setting changes, and loads on start")
 local cfgInput = cfgProfile
-Misc:CreateInput({ Name = "Config Name", Description = "Letters, numbers, - and _ only. Active: " .. cfgProfile,
+Misc:CreateInput({
+	Name = "Config Name", Description = "Letters, numbers, - and _ only. Active: " .. cfgProfile,
 	PlaceholderText = cfgProfile, CurrentValue = cfgProfile, RemoveTextAfterFocusLost = false,
-	Callback = function(t) cfgInput = cleanName(t) or cfgProfile end })
+	Callback = function(t) cfgInput = cleanName(t) or cfgProfile end,
+})
 Misc:CreateButton({ Name = "Save Config", Description = "Saves under the name above and makes it the active config", Callback = function()
 	local ok, err = saveCfg(cfgInput)
 	if ok then setProfile(cfgInput) end
@@ -1547,7 +1691,7 @@ Misc:CreateButton({ Name = "List Configs", Callback = function()
 		local okl, files = pcall(listfiles, CFG_DIR)
 		if okl then
 			for _, f in ipairs(files) do
-				local n = tostring(f):match("([^/\]+)%.json$")
+				local n = tostring(f):match("([^/\\]+)%.json$")
 				if n then names[#names + 1] = n end
 			end
 		end
@@ -1559,29 +1703,7 @@ Misc:CreateButton({ Name = "Delete Config", Description = "Deletes the config na
 	notify("Config", okd and ("Deleted " .. cfgInput) or "Could not delete", okd and "delete" or "warning")
 end })
 
--- auto-save: write whenever something changed, and at least every 30 seconds
-local lastSig = signature()
-local saveFailedNotified = false
-task.spawn(function()
-	local sinceForce = 0
-	while alive() do
-		task.wait(1.5)
-		sinceForce += 1.5
-		if Cfg.AutoSave then
-			local sig = signature()
-			if sig ~= lastSig or sinceForce >= 30 then
-				local ok, err = saveCfg()
-				if ok then
-					lastSig, sinceForce, saveFailedNotified = sig, 0, false
-				elseif not saveFailedNotified then
-					saveFailedNotified = true
-					notify("Auto Save failed", tostring(err), "warning")
-				end
-			end
-		end
-	end
-end)
-cleanup(function() if Cfg.AutoSave then saveCfg() end end)
+head(Misc, "Session")
 Misc:CreateButton({ Name = "Unload Hub", Description = "Turns everything off and removes the menu", Callback = function()
 	panic()
 	if getgenv().FurinaHubUnload then
@@ -1597,4 +1719,16 @@ Misc:CreateButton({ Name = "Rejoin Server", Callback = function()
 end })
 Misc:CreateLabel({ Text = "Furina Hub - Silent Assassins", Style = 2 })
 
-Luna:Notification({ Title = "Furina Hub", Content = "Loaded. Combat + new ESP ready.", Icon = "check_circle", ImageSource = "Material" })
+-- debugging handles for an executor console
+getgenv().FurinaDebug = {
+	setBoost = setBoost, applyFPSCap = applyFPSCap, panic = panic, refreshUI = refreshUI,
+	attackOnce = attackOnce, getEnemies = getEnemies, closest = closest,
+	status = function() return { lastHit = lastHit, hitsSent = hitsSent, lastTargets = lastTargets } end,
+}
+cleanup(function() getgenv().FurinaDebug = nil end)
+
+-- apply saved performance settings (toggles do not fire their callbacks at creation)
+if Cfg.FPSBoost then setBoost(true) end
+if Cfg.FPSCapOn then applyFPSCap() end
+
+notify("Furina Hub", "Loaded.", "check_circle")
