@@ -59,10 +59,16 @@ local Luna = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nebula-S
 
 local Cfg = {
 	-- esp
-	ESP = false, Box = true, BoxFill = false, Name = true, Health = true, Distance = true,
-	Weapon = true, Tracers = false, Chams = true, Rainbow = false, ESPMax = 1500,
-	ESPColor = Color3.fromRGB(120, 170, 255), TargetColor = Color3.fromRGB(255, 70, 70),
-	TracerOrigin = "Bottom",
+	ESP = false, Box = true, BoxStyle = "Corners", BoxThick = 1, BoxFill = false,
+	Name = true, Health = true, HPText = true, Distance = true, Weapon = true,
+	TargetTag = true, Threat = true, TextSize = 13,
+	Skeleton = true, SkelDist = 220, HeadDot = false, LookLine = false,
+	Tracers = false, TracerOrigin = "Bottom", Chams = true, ChamsFill = 65,
+	VisCheck = true, Rainbow = false, ESPMax = 1500, ChestESP = false,
+	Radar = true, RadarRange = 120, RadarSize = 70, RadarX = 95, RadarY = 175,
+	ESPColor = Color3.fromRGB(120, 170, 255), VisColor = Color3.fromRGB(90, 255, 120),
+	TargetColor = Color3.fromRGB(255, 70, 70), ThreatColor = Color3.fromRGB(255, 170, 0),
+	ESPKey = Enum.KeyCode.Z,
 	-- combat
 	Aura = false, AuraRange = 12, AuraDelay = 0.12, AuraAll = true, AutoEquip = true,
 	FaceTarget = false, Stick = false, StickDist = 4, SkipFF = true,
@@ -86,11 +92,29 @@ local Cfg = {
 getgenv().FurinaCfg = Cfg -- live settings table, handy for debugging from an executor console
 
 -- Config save/load ---------------------------------------------------------------
+-- Settings live in <workspace>/FurinaHub/<profile>.json and the active profile name in
+-- FurinaHub/_profile.txt. Auto-save writes whenever a setting changes (checked every 1.5s), so
+-- nothing is lost if the game closes. Every file call is guarded because executors differ:
+-- some throw if a folder already exists, and some lack isfolder or listfiles.
 local HttpService = game:GetService("HttpService")
-local CFG_FILE = "FurinaHub/silent_assassins.json"
+local CFG_DIR = "FurinaHub"
+local PROFILE_FILE = CFG_DIR .. "/_profile.txt"
+local cfgProfile = "silent_assassins"
 -- Not restored on launch: rolling spends currency; the others need setup code that only runs when toggled.
 local NOSAVE = { Rolling = true, Fly = true, Fullbright = true, Stick = true }
 Cfg.AutoSave = true
+
+local fsOK = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+local function cfgPath(name) return CFG_DIR .. "/" .. name .. ".json" end
+local function cleanName(s)
+	s = tostring(s or ""):gsub("[^%w_%-]", "")
+	if s == "" then return nil end
+	return s:sub(1, 32)
+end
+local function ensureDir()
+	if makefolder and not (isfolder and isfolder(CFG_DIR)) then pcall(makefolder, CFG_DIR) end
+end
+local function validNumber(v) return v == v and v ~= math.huge and v ~= -math.huge end
 
 local function encodeCfg()
 	local t = {}
@@ -103,23 +127,55 @@ local function encodeCfg()
 				local names = {}
 				for n in pairs(v) do names[#names + 1] = n end
 				t[k] = { __ig = names }
-			elseif ty == "boolean" or ty == "number" or ty == "string" then t[k] = v end
+			elseif ty == "number" then
+				if validNumber(v) then t[k] = v end
+			elseif ty == "boolean" or ty == "string" then
+				t[k] = v
+			end
 		end
 	end
 	return HttpService:JSONEncode(t)
 end
 
-local function saveCfg()
-	local ok, err = pcall(function()
-		makefolder("FurinaHub")
-		writefile(CFG_FILE, encodeCfg())
-	end)
-	return ok, err
+-- cheap, order-independent fingerprint used to notice that something changed
+local function signature()
+	local parts = {}
+	for k, v in pairs(Cfg) do
+		if not NOSAVE[k] then
+			local ty = typeof(v)
+			if ty == "table" then
+				local names = {}
+				for n in pairs(v) do names[#names + 1] = n end
+				table.sort(names)
+				parts[#parts + 1] = k .. "=" .. table.concat(names, ",")
+			elseif ty == "Color3" then
+				parts[#parts + 1] = k .. "=" .. v:ToHex()
+			else
+				parts[#parts + 1] = k .. "=" .. tostring(v)
+			end
+		end
+	end
+	table.sort(parts)
+	return table.concat(parts, ";")
 end
 
-local function loadCfg()
-	if not isfile or not isfile(CFG_FILE) then return false end
-	local ok, data = pcall(function() return HttpService:JSONDecode(readfile(CFG_FILE)) end)
+local function saveCfg(name)
+	if not fsOK then return false, "this executor has no file functions (writefile/readfile/isfile)" end
+	name = name or cfgProfile
+	ensureDir()
+	local ok, json = pcall(encodeCfg)
+	if not ok then return false, "encode failed: " .. tostring(json) end
+	local ok2, err = pcall(writefile, cfgPath(name), json)
+	if not ok2 then return false, tostring(err) end
+	if not isfile(cfgPath(name)) then return false, "wrote the file but it is not there afterwards" end
+	return true
+end
+
+local function loadCfg(name)
+	if not fsOK then return false end
+	name = name or cfgProfile
+	if not isfile(cfgPath(name)) then return false end
+	local ok, data = pcall(function() return HttpService:JSONDecode(readfile(cfgPath(name))) end)
 	if not ok or type(data) ~= "table" then return false end
 	for k, v in pairs(data) do
 		local cur = Cfg[k]
@@ -127,8 +183,8 @@ local function loadCfg()
 			if type(v) == "table" and v.__c and typeof(cur) == "Color3" then
 				Cfg[k] = Color3.new(v.__c[1], v.__c[2], v.__c[3])
 			elseif type(v) == "table" and v.__k and typeof(cur) == "EnumItem" then
-				local en = pcall(function() return Enum.KeyCode[v.__k] end) and Enum.KeyCode[v.__k]
-				if en then Cfg[k] = en end
+				local okk, en = pcall(function() return Enum.KeyCode[v.__k] end)
+				if okk and en then Cfg[k] = en end
 			elseif type(v) == "table" and v.__ig and k == "Ignore" then
 				Cfg.Ignore = {}
 				for _, n in ipairs(v.__ig) do Cfg.Ignore[n] = true end
@@ -138,6 +194,19 @@ local function loadCfg()
 		end
 	end
 	return true
+end
+
+local function setProfile(name)
+	cfgProfile = name
+	if fsOK then
+		ensureDir()
+		pcall(writefile, PROFILE_FILE, name)
+	end
+end
+
+if fsOK and isfile(PROFILE_FILE) then
+	local okp, saved = pcall(readfile, PROFILE_FILE)
+	if okp then cfgProfile = cleanName(saved) or cfgProfile end
 end
 local cfgLoaded = loadCfg()
 
@@ -179,9 +248,24 @@ local function closestEnemy(maxDist)
 	return best, bestD
 end
 
+-- true while this animator is playing a swing (this game stores swings in a folder named "Attack")
+local function isAttacking(animator)
+	for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+		local a = tr.Animation
+		if a and a.Parent and a.Parent.Name == "Attack" and tr.TimePosition < 0.5 then return true end
+	end
+	return false
+end
+
 -- ESP (Drawing) -----------------------------------------------------------
-local esp = {} -- [Player] = {drawings..., hl}
+-- Per-player pool: boxes (full or corner style), health bar + number, name, flags, info line,
+-- skeleton, head dot, look direction, tracer, off-screen arrow, radar dot and chams.
+local esp = {} -- [Player] = pool of drawings + cached state
 local allDrawings = {}
+local shadow = setmetatable({}, { __mode = "k" }) -- last value written to each Drawing property
+local BLACK, WHITE = Color3.new(0, 0, 0), Color3.new(1, 1, 1)
+local GuiService = game:GetService("GuiService")
+local CollectionService = game:GetService("CollectionService")
 
 local function newDraw(kind, props)
 	local d = Drawing.new(kind)
@@ -190,82 +274,234 @@ local function newDraw(kind, props)
 	return d
 end
 
+-- write a Drawing property only when it actually changed (cuts redundant renderer calls)
+local function P(d, k, v)
+	local s = shadow[d]
+	if not s then s = {} shadow[d] = s end
+	if s[k] ~= v then
+		s[k] = v
+		d[k] = v
+	end
+end
+
+local BONES_R6 = {
+	{ "Head", "Torso" }, { "Torso", "Left Arm" }, { "Torso", "Right Arm" },
+	{ "Torso", "Left Leg" }, { "Torso", "Right Leg" },
+}
+local BONES_R15 = {
+	{ "Head", "UpperTorso" }, { "UpperTorso", "LowerTorso" },
+	{ "UpperTorso", "LeftUpperArm" }, { "LeftUpperArm", "LeftLowerArm" }, { "LeftLowerArm", "LeftHand" },
+	{ "UpperTorso", "RightUpperArm" }, { "RightUpperArm", "RightLowerArm" }, { "RightLowerArm", "RightHand" },
+	{ "LowerTorso", "LeftUpperLeg" }, { "LeftUpperLeg", "LeftLowerLeg" }, { "LeftLowerLeg", "LeftFoot" },
+	{ "LowerTorso", "RightUpperLeg" }, { "RightUpperLeg", "RightLowerLeg" }, { "RightLowerLeg", "RightFoot" },
+}
+
 local function getESP(plr)
 	local o = esp[plr]
 	if o then return o end
-	o = {
-		boxOut = newDraw("Square", { Thickness = 3, Filled = false, Color = Color3.new(0, 0, 0), Visible = false }),
-		box = newDraw("Square", { Thickness = 1, Filled = false, Visible = false }),
-		fill = newDraw("Square", { Filled = true, Transparency = 0.15, Visible = false }),
-		hpOut = newDraw("Line", { Thickness = 4, Color = Color3.new(0, 0, 0), Visible = false }),
-		hp = newDraw("Line", { Thickness = 2, Visible = false }),
-		name = newDraw("Text", { Size = 14, Center = true, Outline = true, Visible = false }),
-		info = newDraw("Text", { Size = 12, Center = true, Outline = true, Visible = false }),
-		tracer = newDraw("Line", { Thickness = 1, Visible = false }),
-		arrow = newDraw("Triangle", { Filled = true, Thickness = 1, Visible = false }),
-	}
+	o = { all = {}, cOut = {}, c = {}, bones = {}, vis = true, visT = 0, atk = false, atkT = 0 }
+	local function mk(kind, props)
+		local d = newDraw(kind, props)
+		o.all[#o.all + 1] = d
+		return d
+	end
+	o.boxOut = mk("Square", { Thickness = 3, Filled = false, Color = BLACK, Visible = false })
+	o.box = mk("Square", { Thickness = 1, Filled = false, Visible = false })
+	o.fill = mk("Square", { Filled = true, Transparency = 0.15, Visible = false })
+	for i = 1, 8 do o.cOut[i] = mk("Line", { Thickness = 3, Color = BLACK, Visible = false }) end
+	for i = 1, 8 do o.c[i] = mk("Line", { Thickness = 1, Visible = false }) end
+	o.hpBack = mk("Line", { Thickness = 4, Color = BLACK, Visible = false })
+	o.hp = mk("Line", { Thickness = 2, Visible = false })
+	o.hpTxt = mk("Text", { Size = 11, Center = true, Outline = true, Color = WHITE, Visible = false })
+	o.name = mk("Text", { Size = 14, Center = true, Outline = true, Visible = false })
+	o.flag = mk("Text", { Size = 12, Center = true, Outline = true, Visible = false })
+	o.info = mk("Text", { Size = 12, Center = true, Outline = true, Color = WHITE, Visible = false })
+	o.tracer = mk("Line", { Thickness = 1, Visible = false })
+	o.arrow = mk("Triangle", { Filled = true, Thickness = 1, Visible = false })
+	o.arrowTxt = mk("Text", { Size = 12, Center = true, Outline = true, Visible = false })
+	for i = 1, 14 do o.bones[i] = mk("Line", { Thickness = 1, Visible = false }) end
+	o.headDot = mk("Circle", { Thickness = 1, Filled = false, Visible = false })
+	o.look = mk("Line", { Thickness = 1, Visible = false })
+	o.dot = mk("Circle", { Filled = true, Radius = 3, Visible = false })
 	esp[plr] = o
 	return o
 end
 
-local function hideESP(o)
-	for k, d in pairs(o) do
-		if k ~= "hl" and typeof(d) ~= "Instance" then d.Visible = false end
-	end
+local function hideAll(o)
+	for _, d in ipairs(o.all) do P(d, "Visible", false) end
 	if o.hl then o.hl.Enabled = false end
 end
 
 local function removeESP(plr)
 	local o = esp[plr]
 	if not o then return end
-	for k, d in pairs(o) do
-		if typeof(d) == "Instance" then
-			d:Destroy()
-		else
-			pcall(function() d:Remove() end)
-			local i = table.find(allDrawings, d)
-			if i then table.remove(allDrawings, i) end -- don't keep dead handles forever
-		end
+	if o.hl then o.hl:Destroy() end
+	local drop = {}
+	for _, d in ipairs(o.all) do
+		pcall(d.Remove, d)
+		drop[d] = true
 	end
+	local keep = {}
+	for _, d in ipairs(allDrawings) do
+		if not drop[d] then keep[#keep + 1] = d end -- don't hold dead handles forever
+	end
+	allDrawings = keep
 	esp[plr] = nil
 end
 
 local function removeAllESP()
 	for plr in pairs(esp) do removeESP(plr) end
-	for _, d in ipairs(allDrawings) do pcall(function() d:Remove() end) end
+	for _, d in ipairs(allDrawings) do pcall(d.Remove, d) end
 	table.clear(allDrawings)
 end
 
-local hlColors = setmetatable({}, { __mode = "k" }) -- last color given to each Highlight
+-- radar ---------------------------------------------------------------------------
+local radar = {}
+local RD = { on = false } -- per-frame radar state shared with radarDot
+local function ensureRadar()
+	if radar.bg then return end
+	radar.bg = newDraw("Circle", { Filled = true, Color = Color3.fromRGB(12, 12, 16), Transparency = 0.55, Visible = false })
+	radar.ring = newDraw("Circle", { Filled = false, Thickness = 1.5, Color = Color3.fromRGB(120, 170, 255), Visible = false })
+	radar.h = newDraw("Line", { Thickness = 1, Color = Color3.fromRGB(70, 70, 85), Visible = false })
+	radar.v = newDraw("Line", { Thickness = 1, Color = Color3.fromRGB(70, 70, 85), Visible = false })
+	radar.me = newDraw("Triangle", { Filled = true, Color = WHITE, Visible = false })
+end
+local function hideRadar()
+	for _, d in pairs(radar) do P(d, "Visible", false) end
+	RD.on = false
+end
+local function radarFrame()
+	ensureRadar()
+	local R = Cfg.RadarSize
+	local center = Vector2.new(Cfg.RadarX, Cfg.RadarY)
+	local lv = Camera.CFrame.LookVector
+	local look = Vector3.new(lv.X, 0, lv.Z)
+	look = look.Magnitude > 0.01 and look.Unit or Vector3.new(0, 0, -1)
+	RD.on, RD.center, RD.R, RD.look, RD.right = true, center, R, look, look:Cross(Vector3.yAxis)
+	P(radar.bg, "Position", center) P(radar.bg, "Radius", R) P(radar.bg, "Visible", true)
+	P(radar.ring, "Position", center) P(radar.ring, "Radius", R) P(radar.ring, "Visible", true)
+	P(radar.h, "From", center - Vector2.new(R, 0)) P(radar.h, "To", center + Vector2.new(R, 0)) P(radar.h, "Visible", true)
+	P(radar.v, "From", center - Vector2.new(0, R)) P(radar.v, "To", center + Vector2.new(0, R)) P(radar.v, "Visible", true)
+	P(radar.me, "PointA", center + Vector2.new(0, -6))
+	P(radar.me, "PointB", center + Vector2.new(-4, 4))
+	P(radar.me, "PointC", center + Vector2.new(4, 4))
+	P(radar.me, "Visible", true)
+end
+local function radarDot(o, r, myRoot, color)
+	if not RD.on or not myRoot then P(o.dot, "Visible", false) return end
+	local d = r.Position - myRoot.Position
+	local v = Vector2.new(d:Dot(RD.right), -d:Dot(RD.look)) / Cfg.RadarRange * RD.R
+	if v.Magnitude > RD.R - 3 then v = v.Unit * (RD.R - 3) end
+	P(o.dot, "Position", RD.center + v)
+	P(o.dot, "Color", color)
+	P(o.dot, "Visible", true)
+end
+
+-- corner-style box -----------------------------------------------------------------
+local function seg(o, i, ax, ay, bx, by, color, thick, show)
+	local a, b = Vector2.new(ax, ay), Vector2.new(bx, by)
+	local out, ln = o.cOut[i], o.c[i]
+	P(out, "From", a) P(out, "To", b) P(out, "Thickness", thick + 2) P(out, "Visible", show)
+	P(ln, "From", a) P(ln, "To", b) P(ln, "Color", color) P(ln, "Thickness", thick) P(ln, "Visible", show)
+end
+local function setCorners(o, x, y, w, h, color, thick, show)
+	local L = math.clamp(math.min(w, h) * 0.28, 4, 20)
+	local x2, y2 = x + w, y + h
+	seg(o, 1, x, y, x + L, y, color, thick, show)
+	seg(o, 2, x, y, x, y + L, color, thick, show)
+	seg(o, 3, x2, y, x2 - L, y, color, thick, show)
+	seg(o, 4, x2, y, x2, y + L, color, thick, show)
+	seg(o, 5, x, y2, x + L, y2, color, thick, show)
+	seg(o, 6, x, y2, x, y2 - L, color, thick, show)
+	seg(o, 7, x2, y2, x2 - L, y2, color, thick, show)
+	seg(o, 8, x2, y2, x2, y2 - L, color, thick, show)
+end
+
+-- visibility (line of sight from your camera) ------------------------------------------
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = true
+local function canSee(c, r)
+	local cam = Camera.CFrame.Position
+	local mine = LP.Character
+	rayParams.FilterDescendantsInstances = mine and { mine, Camera } or { Camera }
+	local res = workspace:Raycast(cam, r.Position - cam, rayParams)
+	if not res or res.Instance:IsDescendantOf(c) then return true end
+	local head = c:FindFirstChild("Head")
+	if head then
+		res = workspace:Raycast(cam, head.Position - cam, rayParams)
+		return not res or res.Instance:IsDescendantOf(c)
+	end
+	return false
+end
+
+-- main renderer -------------------------------------------------------------------------
+local hlColors = setmetatable({}, { __mode = "k" }) -- last color / fill given to each Highlight
+local hlFills = setmetatable({}, { __mode = "k" })
 local cachedTarget, targetClock = nil, 0
 local anyESP = false
+
 local function renderESP()
-	if not Cfg.ESP and not anyESP then return end -- nothing drawn, nothing to hide
+	if not Cfg.ESP then
+		if anyESP then
+			for _, o in pairs(esp) do hideAll(o) end
+			hideRadar()
+			anyESP = false
+		end
+		return
+	end
+	anyESP = true
+
 	local myRoot = root()
 	local vp = Camera.ViewportSize
 	local now = os.clock()
 	if now - targetClock > 0.15 then
 		targetClock = now
-		cachedTarget = Cfg.ESP and closestEnemy(1e9) or nil
+		cachedTarget = closestEnemy(1e9)
 	end
 	local target = cachedTarget
-	anyESP = Cfg.ESP
-	local rainbow = Color3.fromHSV((os.clock() * 0.25) % 1, 0.8, 1)
+	local rainbow = Color3.fromHSV((now * 0.25) % 1, 0.8, 1)
+	if Cfg.Radar then radarFrame() else hideRadar() end
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LP then
 			local c, h, r = validEnemy(plr)
 			local o = esp[plr]
-			if not (Cfg.ESP and c) then
-				if o then hideESP(o) end
+			if not c then
+				if o then hideAll(o) end
 				continue
 			end
 			o = o or getESP(plr)
 
 			local dist = myRoot and (myRoot.Position - r.Position).Magnitude or 0
-			if dist > Cfg.ESPMax then hideESP(o) continue end
 
-			local color = (plr == target) and Cfg.TargetColor or (Cfg.Rainbow and rainbow or Cfg.ESPColor)
+			-- state that only needs refreshing a few times a second
+			if Cfg.VisCheck and now - o.visT > 0.2 then
+				o.visT = now
+				o.vis = canSee(c, r)
+			end
+			if Cfg.Threat and dist < 60 then
+				if now - o.atkT > 0.1 then
+					o.atkT = now
+					if not o.animator or o.animator.Parent == nil then
+						o.animator = c:FindFirstChildWhichIsA("Animator", true)
+					end
+					o.atk = o.animator ~= nil and isAttacking(o.animator)
+				end
+			else
+				o.atk = false
+			end
+
+			local color = Cfg.Rainbow and rainbow or Cfg.ESPColor
+			if Cfg.VisCheck and o.vis and not Cfg.Rainbow then color = Cfg.VisColor end
+			if plr == target then color = Cfg.TargetColor end
+			if o.atk and Cfg.Threat then color = Cfg.ThreatColor end
+
+			if dist > Cfg.ESPMax then
+				hideAll(o)
+				radarDot(o, r, myRoot, color)
+				continue
+			end
 
 			-- chams
 			if Cfg.Chams then
@@ -274,7 +510,6 @@ local function renderESP()
 					local hl = Instance.new("Highlight")
 					hl.Name = "FurinaChams"
 					hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-					hl.FillTransparency = 0.65
 					hl.Adornee = c
 					hl.Parent = c
 					o.hl = hl
@@ -284,6 +519,11 @@ local function renderESP()
 					o.hl.FillColor = color
 					o.hl.OutlineColor = color
 				end
+				local fill = Cfg.ChamsFill / 100
+				if hlFills[o.hl] ~= fill then
+					hlFills[o.hl] = fill
+					o.hl.FillTransparency = fill
+				end
 				if not o.hl.Enabled then o.hl.Enabled = true end
 			elseif o.hl then
 				o.hl.Enabled = false
@@ -291,10 +531,12 @@ local function renderESP()
 
 			local top, topOn = Camera:WorldToViewportPoint(r.Position + Vector3.new(0, 2.9, 0))
 			local bot = Camera:WorldToViewportPoint(r.Position - Vector3.new(0, 3.1, 0))
+			local rp = Camera:WorldToViewportPoint(r.Position)
+
 			if not topOn or top.Z <= 0 then
-				for k, d in pairs(o) do if k ~= "hl" and typeof(d) ~= "Instance" and k ~= "tracer" then d.Visible = false end end
+				hideAll(o)
+				if o.hl and Cfg.Chams then o.hl.Enabled = true end
 				if Cfg.Arrows then
-					local rp = Camera:WorldToViewportPoint(r.Position)
 					local center = vp / 2
 					local v = Vector2.new(rp.X, rp.Y) - center
 					if rp.Z < 0 then v = -v end
@@ -302,35 +544,60 @@ local function renderESP()
 					local dir = v.Unit
 					local perp = Vector2.new(-dir.Y, dir.X)
 					local pos = center + dir * math.min(vp.X, vp.Y) * 0.38
-					o.arrow.PointA = pos + dir * 14
-					o.arrow.PointB = pos - dir * 6 + perp * 9
-					o.arrow.PointC = pos - dir * 6 - perp * 9
-					o.arrow.Color = color
-					o.arrow.Visible = true
+					P(o.arrow, "PointA", pos + dir * 14)
+					P(o.arrow, "PointB", pos - dir * 6 + perp * 9)
+					P(o.arrow, "PointC", pos - dir * 6 - perp * 9)
+					P(o.arrow, "Color", color)
+					P(o.arrow, "Visible", true)
+					P(o.arrowTxt, "Text", math.floor(dist) .. "m")
+					P(o.arrowTxt, "Position", pos + dir * 28 - Vector2.new(0, 6))
+					P(o.arrowTxt, "Color", color)
+					P(o.arrowTxt, "Visible", true)
 				end
 			else
-				o.arrow.Visible = false
+				P(o.arrow, "Visible", false)
+				P(o.arrowTxt, "Visible", false)
+
 				local height = math.abs(bot.Y - top.Y)
 				local width = height * 0.55
 				local x, y = top.X - width / 2, top.Y
 				local pos, size = Vector2.new(x, y), Vector2.new(width, height)
+				local thick = Cfg.BoxThick
+				local full = Cfg.Box and Cfg.BoxStyle == "Full"
+				local corners = Cfg.Box and Cfg.BoxStyle ~= "Full"
 
-				o.boxOut.Position, o.boxOut.Size, o.boxOut.Visible = pos, size, Cfg.Box
-				o.box.Position, o.box.Size, o.box.Color, o.box.Visible = pos, size, color, Cfg.Box
-				o.fill.Position, o.fill.Size, o.fill.Color, o.fill.Visible = pos, size, color, Cfg.BoxFill
+				P(o.boxOut, "Position", pos) P(o.boxOut, "Size", size) P(o.boxOut, "Thickness", thick + 2) P(o.boxOut, "Visible", full)
+				P(o.box, "Position", pos) P(o.box, "Size", size) P(o.box, "Color", color) P(o.box, "Thickness", thick) P(o.box, "Visible", full)
+				P(o.fill, "Position", pos) P(o.fill, "Size", size) P(o.fill, "Color", color) P(o.fill, "Visible", Cfg.BoxFill)
+				setCorners(o, x, y, width, height, color, thick, corners)
 
+				-- health bar and number
 				local frac = math.clamp(h.Health / math.max(h.MaxHealth, 1), 0, 1)
-				local bx = x - 5
-				o.hpOut.From, o.hpOut.To, o.hpOut.Visible = Vector2.new(bx, y + height + 1), Vector2.new(bx, y - 1), Cfg.Health
-				o.hp.From = Vector2.new(bx, y + height)
-				o.hp.To = Vector2.new(bx, y + height - height * frac)
-				o.hp.Color = Color3.fromHSV(frac * 0.33, 1, 1)
-				o.hp.Visible = Cfg.Health
+				local bx = x - 5 - thick
+				P(o.hpBack, "From", Vector2.new(bx, y + height + 1)) P(o.hpBack, "To", Vector2.new(bx, y - 1)) P(o.hpBack, "Visible", Cfg.Health)
+				P(o.hp, "From", Vector2.new(bx, y + height)) P(o.hp, "To", Vector2.new(bx, y + height - height * frac))
+				P(o.hp, "Color", Color3.fromHSV(frac * 0.33, 1, 1)) P(o.hp, "Visible", Cfg.Health)
+				P(o.hpTxt, "Text", tostring(math.floor(h.Health)))
+				P(o.hpTxt, "Position", Vector2.new(bx - 13, y + height - height * frac - 6))
+				P(o.hpTxt, "Visible", Cfg.Health and Cfg.HPText)
 
-				o.name.Text = plr.DisplayName
-				o.name.Position = Vector2.new(top.X, y - 16)
-				o.name.Color = color
-				o.name.Visible = Cfg.Name
+				-- text, scaled down with distance
+				local ts = math.clamp(Cfg.TextSize * (1.2 - dist / math.max(Cfg.ESPMax, 1) * 0.5), 9, 22)
+				P(o.name, "Text", plr.DisplayName)
+				P(o.name, "Size", ts)
+				P(o.name, "Position", Vector2.new(top.X, y - ts - 4))
+				P(o.name, "Color", color)
+				P(o.name, "Visible", Cfg.Name)
+
+				if o.atk and Cfg.Threat then
+					P(o.flag, "Text", "!! ATTACKING !!") P(o.flag, "Color", Cfg.ThreatColor)
+					P(o.flag, "Position", Vector2.new(top.X, y - ts * 2 - 8)) P(o.flag, "Size", ts) P(o.flag, "Visible", true)
+				elseif plr == target and Cfg.TargetTag then
+					P(o.flag, "Text", "TARGET") P(o.flag, "Color", Cfg.TargetColor)
+					P(o.flag, "Position", Vector2.new(top.X, y - ts * 2 - 8)) P(o.flag, "Size", ts) P(o.flag, "Visible", true)
+				else
+					P(o.flag, "Visible", false)
+				end
 
 				local parts = {}
 				if Cfg.Distance then parts[#parts + 1] = math.floor(dist) .. "m" end
@@ -338,24 +605,124 @@ local function renderESP()
 					local t = toolOf(c)
 					if t then parts[#parts + 1] = t.Name end
 				end
-				o.info.Text = table.concat(parts, " | ")
-				o.info.Position = Vector2.new(top.X, y + height + 2)
-				o.info.Color = Color3.new(1, 1, 1)
-				o.info.Visible = #parts > 0
+				P(o.info, "Text", table.concat(parts, " | "))
+				P(o.info, "Size", math.max(ts - 1, 9))
+				P(o.info, "Position", Vector2.new(top.X, y + height + 2))
+				P(o.info, "Visible", #parts > 0)
+
+				-- skeleton
+				local nBones = 0
+				if Cfg.Skeleton and dist <= Cfg.SkelDist then
+					local bones = c:FindFirstChild("Torso") and BONES_R6 or BONES_R15
+					nBones = #bones
+					for i, pair in ipairs(bones) do
+						local ln = o.bones[i]
+						local a, b = c:FindFirstChild(pair[1]), c:FindFirstChild(pair[2])
+						local shown = false
+						if a and b then
+							local pa = Camera:WorldToViewportPoint(a.Position)
+							local pb = Camera:WorldToViewportPoint(b.Position)
+							if pa.Z > 0 and pb.Z > 0 then
+								P(ln, "From", Vector2.new(pa.X, pa.Y))
+								P(ln, "To", Vector2.new(pb.X, pb.Y))
+								P(ln, "Color", color)
+								shown = true
+							end
+						end
+						P(ln, "Visible", shown)
+					end
+				end
+				for i = nBones + 1, 14 do P(o.bones[i], "Visible", false) end
+
+				-- head dot and look direction
+				local head = c:FindFirstChild("Head")
+				if head and (Cfg.HeadDot or Cfg.LookLine) then
+					local hp2, hOn = Camera:WorldToViewportPoint(head.Position)
+					if hOn and hp2.Z > 0 then
+						P(o.headDot, "Position", Vector2.new(hp2.X, hp2.Y))
+						P(o.headDot, "Radius", math.clamp(height * 0.09, 2, 14))
+						P(o.headDot, "Color", color)
+						P(o.headDot, "Visible", Cfg.HeadDot)
+						if Cfg.LookLine then
+							local tip = Camera:WorldToViewportPoint(head.Position + head.CFrame.LookVector * 5)
+							P(o.look, "From", Vector2.new(hp2.X, hp2.Y))
+							P(o.look, "To", Vector2.new(tip.X, tip.Y))
+							P(o.look, "Color", color)
+							P(o.look, "Visible", tip.Z > 0)
+						else
+							P(o.look, "Visible", false)
+						end
+					else
+						P(o.headDot, "Visible", false)
+						P(o.look, "Visible", false)
+					end
+				else
+					P(o.headDot, "Visible", false)
+					P(o.look, "Visible", false)
+				end
 			end
 
-			if Cfg.Tracers then
-				local rp, on = Camera:WorldToViewportPoint(r.Position)
-				if on and rp.Z > 0 then
-					local from = Cfg.TracerOrigin == "Center" and vp / 2 or Vector2.new(vp.X / 2, vp.Y)
-					o.tracer.From, o.tracer.To = from, Vector2.new(rp.X, rp.Y)
-					o.tracer.Color = color
-					o.tracer.Visible = true
+			-- tracer
+			if Cfg.Tracers and rp.Z > 0 then
+				local from
+				if Cfg.TracerOrigin == "Center" then
+					from = vp / 2
+				elseif Cfg.TracerOrigin == "Mouse" then
+					from = UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
 				else
-					o.tracer.Visible = false
+					from = Vector2.new(vp.X / 2, vp.Y)
 				end
+				P(o.tracer, "From", from)
+				P(o.tracer, "To", Vector2.new(rp.X, rp.Y))
+				P(o.tracer, "Color", color)
+				P(o.tracer, "Visible", true)
 			else
-				o.tracer.Visible = false
+				P(o.tracer, "Visible", false)
+			end
+
+			radarDot(o, r, myRoot, color)
+		end
+	end
+end
+
+-- chest ESP (gacha chests carry the "GachaChest" tag) ---------------------------------------
+local chestDraw = {} -- [Instance] = Text
+local chestList, chestClock = {}, 0
+local function hideChests()
+	for _, t in pairs(chestDraw) do P(t, "Visible", false) end
+end
+local function renderChests()
+	if not Cfg.ChestESP then hideChests() return end
+	local now = os.clock()
+	if now - chestClock > 3 then
+		chestClock = now
+		chestList = CollectionService:GetTagged("GachaChest")
+		local keep = {}
+		for _, m in ipairs(chestList) do keep[m] = true end
+		for m, t in pairs(chestDraw) do
+			if not keep[m] then
+				pcall(t.Remove, t)
+				chestDraw[m] = nil
+			end
+		end
+	end
+	local myRoot = root()
+	for _, m in ipairs(chestList) do
+		local part = m:IsA("BasePart") and m or (m:IsA("Model") and (m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart", true)))
+		if part and part.Parent then
+			local t = chestDraw[m]
+			if not t then
+				t = newDraw("Text", { Size = 13, Center = true, Outline = true, Color = Color3.fromRGB(255, 215, 90), Visible = false })
+				chestDraw[m] = t
+			end
+			local sp, on = Camera:WorldToViewportPoint(part.Position + Vector3.new(0, 3, 0))
+			if on and sp.Z > 0 then
+				local d = myRoot and (myRoot.Position - part.Position).Magnitude or 0
+				P(t, "Text", string.format("%s  %dm", tostring(m:GetAttribute("Chest_Display_Name") or m.Name), math.floor(d)))
+				P(t, "Position", Vector2.new(sp.X, sp.Y))
+				P(t, "Visible", true)
+			else
+				P(t, "Visible", false)
 			end
 		end
 	end
@@ -673,6 +1040,8 @@ connect(UserInputService.InputBegan, function(input, gp)
 	if input.KeyCode == Cfg.AuraKey then
 		setToggle("Aura", not Cfg.Aura)
 		Luna:Notification({ Title = "Kill Aura", Content = Cfg.Aura and "Enabled" or "Disabled", Icon = "gavel", ImageSource = "Material" })
+	elseif input.KeyCode == Cfg.ESPKey then
+		setToggle("ESP", not Cfg.ESP)
 	end
 end)
 
@@ -876,7 +1245,6 @@ local function panic()
 	Camera.FieldOfView = 70
 	local h = hum()
 	if h then h.WalkSpeed = 16 h.JumpPower = 38 end
-	for _, o in pairs(esp) do hideESP(o) end
 	Luna:Notification({ Title = "Panic", Content = "All features disabled.", Icon = "warning", ImageSource = "Material" })
 end
 connect(UserInputService.InputBegan, function(input, gp)
@@ -891,6 +1259,7 @@ connect(RunService.RenderStepped, function(dt)
 	if espAcc >= 1 / 60 then -- 60 ESP updates a second is plenty; skips the rest on fast machines
 		espAcc = 0
 		renderESP()
+		renderChests()
 	end
 	if Cfg.FOVOn then Camera.FieldOfView = Cfg.FOV end
 end)
@@ -969,18 +1338,30 @@ local function tab(name, icon) return Window:CreateTab({ Name = name, Icon = ico
 local function tog(t, name, key, desc, cb)
 	Toggles[key] = t:CreateToggle({ Name = name, Description = desc, CurrentValue = Cfg[key], Callback = function(v) Cfg[key] = v if cb then cb(v) end end })
 end
-local function sld(t, name, key, lo, hi)
-	t:CreateSlider({ Name = name, Range = { lo, hi }, Increment = 1, CurrentValue = Cfg[key], Callback = function(v) Cfg[key] = v end })
+local Sliders = {} -- [key] = { obj, scale } so Load Config can move the sliders too
+-- scale lets a slider show whole numbers for a decimal setting (shown value = Cfg[key] * scale)
+local function sld(t, name, key, lo, hi, scale)
+	scale = scale or 1
+	Sliders[key] = {
+		scale = scale,
+		obj = t:CreateSlider({
+			Name = name, Range = { lo, hi }, Increment = 1,
+			CurrentValue = math.clamp(math.floor(Cfg[key] * scale + 0.5), lo, hi),
+			Callback = function(v) Cfg[key] = v / scale end,
+		}),
+	}
+end
+local function refreshUI() -- push Cfg back into the visible toggles and sliders
+	for key, t in pairs(Toggles) do pcall(function() t:Set(Cfg[key]) end) end
+	for key, s in pairs(Sliders) do pcall(function() s.obj:Set(math.floor(Cfg[key] * s.scale + 0.5)) end) end
 end
 
 local Combat = tab("Combat", "gavel")
 tog(Combat, "Kill Aura", "Aura", "Auto-hits every enemy in range with your equipped weapon")
 sld(Combat, "Aura Range", "AuraRange", 5, 150)
-Combat:CreateSlider({ Name = "Aura Delay (x0.01s)", Range = { 3, 100 }, Increment = 1, CurrentValue = math.clamp(math.floor(Cfg.AuraDelay * 100 + 0.5), 3, 100),
-	Callback = function(v) Cfg.AuraDelay = v / 100 end })
+sld(Combat, "Aura Delay (x0.01s)", "AuraDelay", 3, 100, 100)
 tog(Combat, "No Attack Cooldown", "NoCD", "Swing as fast as the delay below allows (hold left click)")
-Combat:CreateSlider({ Name = "Swing Delay (x0.01s)", Range = { 0, 50 }, Increment = 1, CurrentValue = math.clamp(math.floor(Cfg.NoCDDelay * 100 + 0.5), 0, 50),
-	Callback = function(v) Cfg.NoCDDelay = v / 100 end })
+sld(Combat, "Swing Delay (x0.01s)", "NoCDDelay", 0, 50, 100)
 tog(Combat, "Hit All In Range", "AuraAll", "Off = only the closest enemy")
 tog(Combat, "Auto Equip Weapon", "AutoEquip")
 tog(Combat, "Skip Forcefielded", "SkipFF")
@@ -1013,7 +1394,7 @@ tog(Power, "Aimlock", "Aim", "Smoothly turns the camera to the nearest enemy ins
 tog(Power, "Hold Right Mouse To Aim", "AimHold")
 tog(Power, "Show FOV Circle", "ShowFOV")
 sld(Power, "Aim FOV (px)", "AimFOV", 30, 600)
-Power:CreateSlider({ Name = "Aim Smoothness", Range = { 1, 20 }, Increment = 1, CurrentValue = Cfg.AimSmooth, Callback = function(v) Cfg.AimSmooth = v end })
+sld(Power, "Aim Smoothness", "AimSmooth", 1, 20)
 Power:CreateButton({ Name = "Aim At: Head / Body (toggle)", Callback = function()
 	Cfg.AimPart = Cfg.AimPart == "Head" and "HumanoidRootPart" or "Head"
 	Luna:Notification({ Title = "Aimlock", Content = "Aiming at " .. Cfg.AimPart, Icon = "my_location", ImageSource = "Material" })
@@ -1047,8 +1428,7 @@ end })
 
 local Hit = tab("Hitbox", "crop_free")
 tog(Hit, "Bigger Hitbox", "Hitbox", "Enlarges your weapon hitbox on every swing")
-Hit:CreateSlider({ Name = "Hitbox Size (x)", Range = { 1, 10 }, Increment = 1, CurrentValue = Cfg.HitboxMult,
-	Callback = function(v) Cfg.HitboxMult = v end })
+sld(Hit, "Hitbox Size (x)", "HitboxMult", 1, 10)
 tog(Hit, "Show Hitbox", "ShowHitbox", "Draws the swing box in red neon")
 tog(Hit, "Spoof Size To Server", "SpoofHitbox", "Also reports the bigger size in the hit packet. Riskier: the server sees a number that doesn't match your weapon")
 Hit:CreateLabel({ Text = "Hit detection runs on your client, so the bigger box really catches more enemies. Whether the server accepts far hits is unverified.", Style = 2 })
@@ -1059,35 +1439,68 @@ Luck:CreateLabel({ Text = "Odds by tier (common to best): Basic 76/18/5/1/0 %. D
 Luck:CreateDropdown({ Name = "Chest", Options = { "Basic", "Divine" }, CurrentOption = { Cfg.ChestType }, MultipleOptions = false,
 	Callback = function(o) Cfg.ChestType = type(o) == "table" and o[1] or o end })
 tog(Luck, "Auto Roll", "Rolling", "Rolls the chest repeatedly. Spends your currency.")
-Luck:CreateSlider({ Name = "Stop At Rarity (1-5)", Range = { 1, 5 }, Increment = 1, CurrentValue = Cfg.StopRarity,
-	Callback = function(v) Cfg.StopRarity = v end })
-Luck:CreateSlider({ Name = "Max Rolls", Range = { 1, 200 }, Increment = 1, CurrentValue = Cfg.MaxRolls,
-	Callback = function(v) Cfg.MaxRolls = v end })
-Luck:CreateSlider({ Name = "Roll Delay (x0.1s)", Range = { 3, 40 }, Increment = 1, CurrentValue = math.clamp(math.floor(Cfg.RollDelay * 10 + 0.5), 3, 40),
-	Callback = function(v) Cfg.RollDelay = v / 10 end })
+sld(Luck, "Stop At Rarity (1-5)", "StopRarity", 1, 5)
+sld(Luck, "Max Rolls", "MaxRolls", 1, 200)
+sld(Luck, "Roll Delay (x0.1s)", "RollDelay", 3, 40, 10)
 Luck:CreateButton({ Name = "Roll Status", Callback = function()
 	Luna:Notification({ Title = "Auto Roll", Content = "Rolls " .. roll.count .. " | best rarity " .. roll.best .. " | last: " .. roll.last, Icon = "info", ImageSource = "Material" })
 end })
 Luck:CreateButton({ Name = "Reset Roll Counter", Callback = function() roll.count = 0 roll.best = 0 end })
 
-local Visuals = tab("Visuals", "visibility")
+local function dd(t, name, key, options)
+	t:CreateDropdown({ Name = name, Options = options, CurrentOption = { Cfg[key] }, MultipleOptions = false,
+		Callback = function(o) Cfg[key] = type(o) == "table" and o[1] or o end })
+end
+local function head(t, text) t:CreateLabel({ Text = text, Style = 2 }) end
+
+local ESPTab = tab("ESP", "visibility")
+head(ESPTab, "Master")
+tog(ESPTab, "Player ESP", "ESP", "Master switch for everything below (key: Z by default)")
+ESPTab:CreateBind({ Name = "ESP Key", Description = "Press to toggle ESP", CurrentBind = Cfg.ESPKey.Name,
+	Callback = function() end,
+	OnChangedCallback = function(k) if typeof(k) == "EnumItem" then Cfg.ESPKey = k end end })
+sld(ESPTab, "Max Distance", "ESPMax", 100, 5000)
+head(ESPTab, "Boxes")
+tog(ESPTab, "Boxes", "Box")
+dd(ESPTab, "Box Style", "BoxStyle", { "Corners", "Full" })
+sld(ESPTab, "Box Thickness", "BoxThick", 1, 4)
+tog(ESPTab, "Box Fill", "BoxFill")
+head(ESPTab, "Info")
+tog(ESPTab, "Names", "Name")
+tog(ESPTab, "Health Bar", "Health")
+tog(ESPTab, "Health Number", "HPText")
+tog(ESPTab, "Distance", "Distance")
+tog(ESPTab, "Held Weapon", "Weapon")
+tog(ESPTab, "Attack Warning", "Threat", "Flags enemies that are mid-swing and turns them orange")
+tog(ESPTab, "Target Tag", "TargetTag", "Marks the closest enemy")
+sld(ESPTab, "Text Size", "TextSize", 9, 20)
+head(ESPTab, "Body")
+tog(ESPTab, "Skeleton", "Skeleton")
+sld(ESPTab, "Skeleton Range", "SkelDist", 50, 600)
+tog(ESPTab, "Head Dot", "HeadDot")
+tog(ESPTab, "Look Direction", "LookLine", "A line showing where each enemy is facing")
+tog(ESPTab, "Chams", "Chams", "Highlight through walls")
+sld(ESPTab, "Chams Fill (% see-through)", "ChamsFill", 0, 100)
+head(ESPTab, "Lines and arrows")
+tog(ESPTab, "Tracers", "Tracers")
+dd(ESPTab, "Tracer Origin", "TracerOrigin", { "Bottom", "Center", "Mouse" })
+tog(ESPTab, "Off-Screen Arrows", "Arrows", "Pointers with distance to enemies outside your view")
+head(ESPTab, "Radar")
+tog(ESPTab, "Radar", "Radar", "Top-down map of nearby enemies, top-left of the screen")
+sld(ESPTab, "Radar Range (studs)", "RadarRange", 30, 400)
+sld(ESPTab, "Radar Size", "RadarSize", 40, 120)
+head(ESPTab, "World")
+tog(ESPTab, "Chest ESP", "ChestESP", "Names and distances for gacha chests")
+head(ESPTab, "Colors")
+tog(ESPTab, "Rainbow", "Rainbow")
+tog(ESPTab, "Visible Color", "VisCheck", "Enemies in line of sight use the visible color")
+ESPTab:CreateColorPicker({ Name = "Base Color", Color = Cfg.ESPColor, Callback = function(c) Cfg.ESPColor = c end })
+ESPTab:CreateColorPicker({ Name = "Visible Color", Color = Cfg.VisColor, Callback = function(c) Cfg.VisColor = c end })
+ESPTab:CreateColorPicker({ Name = "Target Color", Color = Cfg.TargetColor, Callback = function(c) Cfg.TargetColor = c end })
+ESPTab:CreateColorPicker({ Name = "Attacking Color", Color = Cfg.ThreatColor, Callback = function(c) Cfg.ThreatColor = c end })
+
+local Visuals = tab("Visuals", "palette")
 tog(Visuals, "HUD", "HUD", "Top-left status line")
-tog(Visuals, "Off-Screen Arrows", "Arrows", "Pointers to enemies outside your view")
-tog(Visuals, "Player ESP", "ESP", "Master switch", function(v) if not v then for _, o in pairs(esp) do hideESP(o) end end end)
-tog(Visuals, "Boxes", "Box")
-tog(Visuals, "Box Fill", "BoxFill")
-tog(Visuals, "Names", "Name")
-tog(Visuals, "Health Bar", "Health")
-tog(Visuals, "Distance", "Distance")
-tog(Visuals, "Held Weapon", "Weapon")
-tog(Visuals, "Tracers", "Tracers")
-tog(Visuals, "Chams", "Chams", "Highlight through walls", function(v)
-	if not v then for _, o in pairs(esp) do if o.hl then o.hl.Enabled = false end end end
-end)
-tog(Visuals, "Rainbow", "Rainbow")
-sld(Visuals, "Max Distance", "ESPMax", 100, 5000)
-Visuals:CreateColorPicker({ Name = "ESP Color", Color = Cfg.ESPColor, Callback = function(c) Cfg.ESPColor = c end })
-Visuals:CreateColorPicker({ Name = "Closest Target Color", Color = Cfg.TargetColor, Callback = function(c) Cfg.TargetColor = c end })
 tog(Visuals, "Fullbright", "Fullbright", nil, applyLight)
 tog(Visuals, "Custom FOV", "FOVOn", nil, function(v) if not v then Camera.FieldOfView = 70 end end)
 sld(Visuals, "FOV", "FOV", 30, 120)
@@ -1106,19 +1519,66 @@ local Misc = tab("Misc", "settings")
 tog(Misc, "FPS Boost", "FPSBoost", "Disables particles, beams, trails and shadows to raise fps. Turn off to restore", setBoost)
 if Cfg.FPSBoost then setBoost(true) end
 tog(Misc, "Anti AFK", "AntiAFK")
-tog(Misc, "Auto Save Config", "AutoSave", "Saves every 20 seconds and loads on start (FurinaHub folder in your workspace)")
-Misc:CreateButton({ Name = "Save Config Now", Callback = function()
-	local ok, err = saveCfg()
-	Luna:Notification({ Title = "Config", Content = ok and "Saved." or ("Save failed: " .. tostring(err)), Icon = ok and "save" or "warning", ImageSource = "Material" })
+local function notify(title, text, icon)
+	Luna:Notification({ Title = title, Content = text, Icon = icon or "info", ImageSource = "Material" })
+end
+tog(Misc, "Auto Save Config", "AutoSave", "Saves a moment after any setting changes, and loads on start")
+local cfgInput = cfgProfile
+Misc:CreateInput({ Name = "Config Name", Description = "Letters, numbers, - and _ only. Active: " .. cfgProfile,
+	PlaceholderText = cfgProfile, CurrentValue = cfgProfile, RemoveTextAfterFocusLost = false,
+	Callback = function(t) cfgInput = cleanName(t) or cfgProfile end })
+Misc:CreateButton({ Name = "Save Config", Description = "Saves under the name above and makes it the active config", Callback = function()
+	local ok, err = saveCfg(cfgInput)
+	if ok then setProfile(cfgInput) end
+	notify("Config", ok and ("Saved as " .. cfgInput) or ("Save failed: " .. tostring(err)), ok and "save" or "warning")
 end })
-Misc:CreateButton({ Name = "Delete Saved Config", Callback = function()
-	pcall(function() if delfile and isfile(CFG_FILE) then delfile(CFG_FILE) end end)
-	Luna:Notification({ Title = "Config", Content = "Deleted. Defaults return next launch.", Icon = "delete", ImageSource = "Material" })
+Misc:CreateButton({ Name = "Load Config", Description = "Loads the name above and updates the menu", Callback = function()
+	if loadCfg(cfgInput) then
+		setProfile(cfgInput)
+		refreshUI()
+		notify("Config", "Loaded " .. cfgInput .. ". Colors and keybinds apply after the next launch.", "check_circle")
+	else
+		notify("Config", "No saved config called " .. cfgInput, "warning")
+	end
 end })
+Misc:CreateButton({ Name = "List Configs", Callback = function()
+	local names = {}
+	if listfiles and isfolder and isfolder(CFG_DIR) then
+		local okl, files = pcall(listfiles, CFG_DIR)
+		if okl then
+			for _, f in ipairs(files) do
+				local n = tostring(f):match("([^/\]+)%.json$")
+				if n then names[#names + 1] = n end
+			end
+		end
+	end
+	notify("Configs", #names > 0 and table.concat(names, ", ") or "none found (or this executor cannot list files)")
+end })
+Misc:CreateButton({ Name = "Delete Config", Description = "Deletes the config named above", Callback = function()
+	local okd = pcall(function() if delfile and isfile(cfgPath(cfgInput)) then delfile(cfgPath(cfgInput)) end end)
+	notify("Config", okd and ("Deleted " .. cfgInput) or "Could not delete", okd and "delete" or "warning")
+end })
+
+-- auto-save: write whenever something changed, and at least every 30 seconds
+local lastSig = signature()
+local saveFailedNotified = false
 task.spawn(function()
+	local sinceForce = 0
 	while alive() do
-		task.wait(20)
-		if Cfg.AutoSave then saveCfg() end
+		task.wait(1.5)
+		sinceForce += 1.5
+		if Cfg.AutoSave then
+			local sig = signature()
+			if sig ~= lastSig or sinceForce >= 30 then
+				local ok, err = saveCfg()
+				if ok then
+					lastSig, sinceForce, saveFailedNotified = sig, 0, false
+				elseif not saveFailedNotified then
+					saveFailedNotified = true
+					notify("Auto Save failed", tostring(err), "warning")
+				end
+			end
+		end
 	end
 end)
 cleanup(function() if Cfg.AutoSave then saveCfg() end end)
