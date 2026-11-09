@@ -226,10 +226,19 @@ local function removeAllESP()
 	table.clear(allDrawings)
 end
 
+local cachedTarget, targetClock = nil, 0
+local anyESP = false
 local function renderESP()
+	if not Cfg.ESP and not anyESP then return end -- nothing drawn, nothing to hide
 	local myRoot = root()
 	local vp = Camera.ViewportSize
-	local target = Cfg.ESP and closestEnemy(1e9) or nil
+	local now = os.clock()
+	if now - targetClock > 0.15 then
+		targetClock = now
+		cachedTarget = Cfg.ESP and closestEnemy(1e9) or nil
+	end
+	local target = cachedTarget
+	anyESP = Cfg.ESP
 	local rainbow = Color3.fromHSV((os.clock() * 0.25) % 1, 0.8, 1)
 
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -577,7 +586,7 @@ connect(RunService.RenderStepped, function(dt)
 	fpsAcc += dt fpsN += 1
 	if fpsAcc >= 0.5 then fps = math.floor(fpsN / fpsAcc) fpsAcc, fpsN = 0, 0 end
 	hud.Visible = Cfg.HUD
-	if Cfg.HUD then
+	if Cfg.HUD and fpsN == 0 then -- rebuild the string only when the fps counter ticks (2x/second)
 		hud.Text = string.format("Furina Hub | %d fps | Aura %s (%d in range, %d sent) | Rolls %d",
 			fps, Cfg.Aura and "ON" or "off", lastTargets, hitsSent, roll.count)
 	end
@@ -769,12 +778,22 @@ connect(RunService.Heartbeat, function()
 	end
 end)
 
+local ncParts, ncChar, ncClock = {}, nil, 0
 connect(RunService.Stepped, function()
 	if not alive() or not Cfg.Noclip then return end
 	local c = char()
 	if not c then return end
-	for _, p in ipairs(c:GetDescendants()) do
-		if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
+	local now = os.clock()
+	if c ~= ncChar or now - ncClock > 1 then -- rescan parts once a second, not every frame
+		ncChar, ncClock = c, now
+		table.clear(ncParts)
+		for _, p in ipairs(c:GetDescendants()) do
+			if p:IsA("BasePart") then ncParts[#ncParts + 1] = p end
+		end
+	end
+	for i = 1, #ncParts do
+		local p = ncParts[i]
+		if p.CanCollide then p.CanCollide = false end
 	end
 end)
 
