@@ -1,6 +1,6 @@
 --[[
 	Furina Hub | Silent Assassins (placeId 103854444055060)
-	UI: Luna Interface Suite (discontinued upstream, still loads)
+	UI: FurinaUI (furina_ui.luau in this repo); falls back to Luna Interface Suite if it cannot load
 
 	Run with loadstring, or through live-reload (STATE). Running it again replaces the old copy.
 
@@ -18,7 +18,6 @@
 	 4. Config files     8. Combat                   12. Input, panic, UI
 ]]
 
-getgenv().ConfirmLuna = true -- hides Luna's deprecation popup
 
 ------------------------------------------------------------------------------------------------------
 -- 1. Bootstrap: standalone teardown when STATE (live-reload) is not provided
@@ -79,9 +78,26 @@ local LP = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local BLACK, WHITE = Color3.new(0, 0, 0), Color3.new(1, 1, 1)
 
-local Luna = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/master/source.lua"))()
+-- UI library: FurinaUI. A copy in the workspace (FurinaHub/furina_ui.luau) wins so edits can be tested without pushing;
+-- otherwise it comes from this repo. If it fails to load for any reason, Luna takes over so the hub still works.
+local FURINA_UI_URL = "https://raw.githubusercontent.com/banglajunaid9-ship-it/furina-hub/main/furina_ui.luau"
+local UI = (function()
+	local src
+	pcall(function()
+		if isfile and readfile and isfile("FurinaHub/furina_ui.luau") then src = readfile("FurinaHub/furina_ui.luau") end
+	end)
+	if not src then pcall(function() src = game:HttpGet(FURINA_UI_URL) end) end
+	if src then
+		local ok, lib = pcall(function() return loadstring(src)() end)
+		if ok and type(lib) == "table" and lib.CreateWindow then return lib end
+		warn("[Furina Hub] FurinaUI failed to load, using Luna instead: " .. tostring(lib))
+	end
+	getgenv().ConfirmLuna = true -- hides Luna's deprecation popup
+	return loadstring(game:HttpGet("https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/master/source.lua"))()
+end)()
+local FURINA = UI.IsFurinaUI == true
 local function notify(title, text, icon)
-	Luna:Notification({ Title = title, Content = text, Icon = icon or "info", ImageSource = "Material" })
+	UI:Notification({ Title = title, Content = text, Icon = icon or "info", ImageSource = "Material" })
 end
 
 ------------------------------------------------------------------------------------------------------
@@ -1443,7 +1459,7 @@ cleanup(function() if Cfg.AutoSave then saveCfg() end end)
 ------------------------------------------------------------------------------------------------------
 -- 13. UI
 ------------------------------------------------------------------------------------------------------
-local Window = Luna:CreateWindow({
+local Window = UI:CreateWindow({
 	Name = "Furina Hub",
 	Subtitle = "Silent Assassins",
 	LogoID = "6031097225",
@@ -1451,10 +1467,12 @@ local Window = Luna:CreateWindow({
 	ConfigSettings = { ConfigFolder = "FurinaHub" },
 	KeySystem = false,
 })
-cleanup(function() pcall(function() Luna:Destroy() end) end)
+cleanup(function() pcall(function() UI:Destroy() end) end)
 
 local function tab(name, icon) return Window:CreateTab({ Name = name, Icon = icon, ImageSource = "Material", ShowTitle = true }) end
-local function head(t, text) t:CreateLabel({ Text = text, Style = 2 }) end
+local function head(t, text)
+	if FURINA then t:CreateSection(text) else t:CreateLabel({ Text = text, Style = 2 }) end
+end
 local function tog(t, name, key, desc, cb)
 	Toggles[key] = t:CreateToggle({
 		Name = name, Description = desc, CurrentValue = Cfg[key],
@@ -1591,7 +1609,7 @@ tog(Power, "Anti Slow", "AntiSlow", "Stops swing and hit slowdowns from reducing
 tog(Power, "Anti Knockback", "AntiKB", "Cancels most of the knockback you take")
 tog(Power, "Always Hold Weapon", "AlwaysEquip", "Re-equips your weapon whenever it is put away")
 bind(Power, "Panic Key", "Turns every feature off at once", "PanicKey")
-Power:CreateButton({ Name = "Panic Now", Callback = panic })
+Power:CreateButton({ Name = "Panic Now", Description = "Turns every feature off at once", Danger = true, Callback = panic })
 Power:CreateInput({
 	Name = "Player Name", Description = "Part of a player's name for the buttons below",
 	PlaceholderText = "name", CurrentValue = "", RemoveTextAfterFocusLost = false,
@@ -1698,19 +1716,19 @@ Misc:CreateButton({ Name = "List Configs", Callback = function()
 	end
 	notify("Configs", #names > 0 and table.concat(names, ", ") or "none found (or this executor cannot list files)")
 end })
-Misc:CreateButton({ Name = "Delete Config", Description = "Deletes the config named above", Callback = function()
+Misc:CreateButton({ Name = "Delete Config", Description = "Deletes the config named above", Danger = true, Callback = function()
 	local okd = pcall(function() if delfile and isfile(cfgPath(cfgInput)) then delfile(cfgPath(cfgInput)) end end)
 	notify("Config", okd and ("Deleted " .. cfgInput) or "Could not delete", okd and "delete" or "warning")
 end })
 
 head(Misc, "Session")
-Misc:CreateButton({ Name = "Unload Hub", Description = "Turns everything off and removes the menu", Callback = function()
+Misc:CreateButton({ Name = "Unload Hub", Description = "Turns everything off and removes the menu", Danger = true, Callback = function()
 	panic()
 	if getgenv().FurinaHubUnload then
 		getgenv().FurinaHubUnload()
 	else
 		unloaded = true
-		pcall(function() Luna:Destroy() end)
+		pcall(function() UI:Destroy() end)
 		pcall(removeAllESP)
 	end
 end })
@@ -1731,4 +1749,5 @@ cleanup(function() getgenv().FurinaDebug = nil end)
 if Cfg.FPSBoost then setBoost(true) end
 if Cfg.FPSCapOn then applyFPSCap() end
 
+if Window.Ready then Window:Ready() end -- FurinaUI: finish the loading screen now that every tab is built
 notify("Furina Hub", "Loaded.", "check_circle")

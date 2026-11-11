@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Furina UI v5</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Ousia (dark) default, Pneuma (light) alternate */
+:root{
+  --bg:#081128; --bg2:#0d1a3d; --panel:rgba(18,38,86,.55); --panel2:rgba(22,44,98,.97);
+  --line:rgba(140,190,255,.13); --text:#eef4ff; --mute:#8299c4; --hydro:#4aa3ff; --aqua:#8fdcff;
+  --gold:#dcb871; --gold2:#fff0c8; --track:rgba(4,10,28,.7); --shadow:rgba(0,0,0,.5);
+  --flow:cubic-bezier(.25,.8,.25,1); --soft:cubic-bezier(.45,0,.2,1); --pop:cubic-bezier(.34,1.4,.64,1);
+}
+:root[data-theme="pneuma"]{
+  --bg:#e6f0ff; --bg2:#f8fbff; --panel:rgba(255,255,255,.7); --panel2:rgba(255,255,255,.98);
+  --line:rgba(30,70,150,.13); --text:#132552; --mute:#6680b0; --hydro:#2f7de1; --aqua:#3ea6ea;
+  --gold:#b48a36; --gold2:#7a5a18; --track:rgba(30,70,150,.1); --shadow:rgba(40,70,140,.2);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{background:radial-gradient(900px 600px at 50% 30%,#14306a,#070f26 62%,#030713);font-family:Outfit,system-ui,sans-serif;color:var(--text);overflow:hidden;user-select:none}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
+  background:linear-gradient(105deg,transparent 30%,rgba(143,220,255,.05) 38%,transparent 46%),linear-gradient(75deg,transparent 52%,rgba(143,220,255,.04) 58%,transparent 64%);
+  animation:rays 14s ease-in-out infinite alternate}
+@keyframes rays{to{transform:translateX(60px)}}
+.top{position:fixed;left:14px;right:14px;top:12px;display:flex;gap:8px;align-items:center;z-index:60;font-size:12px;color:#8299c4}
+.top b{color:#dcb871}
+.top button{background:rgba(18,36,82,.7);border:1px solid rgba(220,184,113,.35);color:#eef4ff;font:500 12px Outfit;padding:6px 11px;border-radius:8px;cursor:pointer}
+.top button:first-of-type{margin-left:auto}
+@media (max-width:640px){.top span{display:none}}
+
+/* ---------------- intro ---------------- */
+.intro{position:fixed;inset:0;z-index:50;pointer-events:none;transition:opacity .7s var(--soft)}
+.intro.done{opacity:0}
+.idrop{position:absolute;left:50%;top:44%;width:14px;height:19px;margin:-19px 0 0 -7px;border-radius:50% 50% 50% 50%/60% 60% 40% 40%;
+  background:radial-gradient(circle at 35% 35%,#fff 0 12%,#8fdcff 40%,#3b86e8);box-shadow:0 0 18px rgba(143,220,255,.8);
+  transform:translateY(-50vh);animation:fall .6s cubic-bezier(.55,0,1,.45) .1s forwards,vanish .15s .7s forwards}
+@keyframes fall{to{transform:none}}
+@keyframes vanish{to{scale:0;opacity:0}}
+.irings{position:absolute;left:50%;top:44%;width:0;height:0;transform:scaleY(.28)}
+.irings i{position:absolute;left:-12px;top:-12px;width:24px;height:24px;border-radius:50%;border:1.5px solid rgba(143,220,255,.85);opacity:0;animation:iring 1.6s var(--flow) forwards}
+.irings i:nth-child(1){animation-delay:.7s}.irings i:nth-child(2){animation-delay:.86s;border-color:rgba(220,184,113,.8)}.irings i:nth-child(3){animation-delay:1.02s}
+@keyframes iring{0%{opacity:.9;transform:scale(.2)}100%{opacity:0;transform:scale(17)}}
+.iline{position:absolute;left:50%;top:44%;height:1px;width:0;translate:-50% 0;background:linear-gradient(90deg,transparent,rgba(143,220,255,.55),transparent);animation:iline 1.4s var(--flow) .7s forwards}
+@keyframes iline{to{width:70vw}}
+.ilogo{position:absolute;left:0;right:0;top:calc(44% - 62px);text-align:center}
+.ilogo h1{font:700 clamp(34px,11vw,50px)/62px Cinzel,serif;letter-spacing:.22em;padding-left:.22em;background:linear-gradient(180deg,#fff,#cfe9ff 55%,#dcb871);-webkit-background-clip:text;color:transparent;
+  opacity:0;animation:emerge 1s var(--flow) .9s forwards}
+.ilogo h1.refl{transform:scaleY(-1);filter:url(#ripple);-webkit-mask:linear-gradient(0deg,rgba(0,0,0,.45),transparent 75%);mask:linear-gradient(0deg,rgba(0,0,0,.45),transparent 75%);animation:emergeR 1s var(--flow) .9s forwards}
+@keyframes emerge{from{opacity:0;transform:translateY(26px);filter:blur(6px)}to{opacity:1;transform:none;filter:blur(0)}}
+@keyframes emergeR{from{opacity:0;transform:scaleY(-1) translateY(26px)}to{opacity:1;transform:scaleY(-1)}}
+.ilogo p{margin-top:2px;font:500 11px Outfit;letter-spacing:.6em;color:#dcb871;opacity:0;animation:emerge .8s var(--flow) 1.3s forwards}
+
+/* ---------------- stage, phone frame ---------------- */
+.stage{position:fixed;inset:0;display:grid;place-items:center}
+.device{position:relative}
+body.sim .device{width:392px;height:800px;border-radius:52px;border:11px solid #04070e;overflow:hidden;display:grid;place-items:center;
+  background:radial-gradient(400px 500px at 50% 20%,#1b3a7a,#081128 70%);box-shadow:0 0 0 2px #26324d,0 40px 90px -20px rgba(0,0,0,.8)}
+body.sim .device::before{content:"";position:absolute;top:10px;left:50%;width:110px;height:30px;margin-left:-55px;border-radius:20px;background:#04070e;z-index:30}
+.wob{position:relative;will-change:transform}
+.wob.boing{animation:boing .6s var(--soft)}
+@keyframes boing{0%{transform:scale(1.025,.975)}35%{transform:scale(.99,1.012)}65%{transform:scale(1.004,.997)}100%{transform:none}}
+
+/* ---------------- window ---------------- */
+.win{--a:0deg;position:relative;width:540px;height:372px;border-radius:16px;padding:1.2px;
+  background:conic-gradient(from var(--a),var(--gold),transparent 20%,transparent 30%,var(--aqua) 50%,transparent 70%,transparent 80%,var(--gold));
+  box-shadow:0 30px 70px -20px rgba(0,0,0,.7),0 0 50px -18px var(--hydro);animation:spin 12s linear infinite;
+  opacity:0;transform:translateY(46px) scale(.97);filter:blur(10px);transition:transform 1.1s var(--flow),opacity .8s var(--soft),filter .9s var(--soft)}
+.win.open{opacity:1;transform:none;filter:blur(0)}
+.win.min{opacity:0;transform:translateY(60px) scale(.88);filter:blur(10px);pointer-events:none;transition:transform .7s var(--soft),opacity .6s,filter .6s}
+@property --a{syntax:"<angle>";initial-value:0deg;inherits:false}
+@keyframes spin{to{--a:360deg}}
+.inner{position:relative;width:100%;height:100%;border-radius:15px;overflow:hidden;display:grid;grid-template-columns:54px 1fr;
+  background:linear-gradient(160deg,var(--bg2),var(--bg));transition:background .5s}
+.fx{position:absolute;inset:-20px;pointer-events:none;transition:transform .6s var(--flow)}
+.caustic{position:absolute;inset:0;opacity:.55;mix-blend-mode:screen;
+  background:radial-gradient(130px 55px at 22% 28%,rgba(143,220,255,.13),transparent 70%),radial-gradient(170px 60px at 72% 52%,rgba(74,163,255,.13),transparent 70%),
+             radial-gradient(110px 45px at 45% 82%,rgba(220,184,113,.08),transparent 70%);animation:drift 13s ease-in-out infinite alternate}
+.caustic.b{animation-duration:19s;animation-direction:alternate-reverse;opacity:.35}
+@keyframes drift{to{transform:translate(40px,-22px) scale(1.15) rotate(5deg)}}
+:root[data-theme="pneuma"] .caustic{mix-blend-mode:multiply;opacity:.3}
+.damask{position:absolute;inset:0;opacity:.045;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'%3E%3Cpath d='M22 4c4 6 10 8 10 14s-6 8-10 14c-4-6-10-8-10-14S18 10 22 4z' fill='none' stroke='%23dcb871' stroke-width='1'/%3E%3C/svg%3E")}
+.orn{position:absolute;width:20px;height:20px;pointer-events:none;z-index:3;opacity:.9}
+.orn.tl{left:3px;top:3px}.orn.tr{right:3px;top:3px;transform:scaleX(-1)}.orn.bl{left:3px;bottom:3px;transform:scaleY(-1)}.orn.br{right:3px;bottom:3px;transform:scale(-1)}
+
+/* logo: a water drop with a gold rim and an F monogram */
+.logo{width:34px;height:38px;cursor:pointer;flex:none;transition:transform .5s var(--pop)}
+.logo svg{width:100%;height:100%;filter:drop-shadow(0 3px 6px rgba(74,163,255,.45));animation:bob 4s ease-in-out infinite}
+@keyframes bob{50%{translate:0 -2px}}
+.logo:hover{transform:scale(1.08) rotate(-6deg)}
+.logo:active{transform:scale(.9)}
+.say{position:absolute;left:46px;top:-38px;z-index:10;padding:5px 11px;border-radius:13px 13px 13px 4px;white-space:nowrap;
+  font:600 12px Outfit;color:#132552;background:#fff;border:1.5px solid var(--gold);box-shadow:0 8px 20px -6px rgba(0,0,0,.5);
+  opacity:0;transform:translateY(6px) scale(.6);transform-origin:0 100%;transition:opacity .25s,transform .45s var(--pop);pointer-events:none}
+.say.on{opacity:1;transform:none}
+
+/* ---------------- rail ---------------- */
+.rail{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;padding:12px 0 10px;gap:6px;border-right:1px solid var(--line);background:rgba(0,0,0,.14)}
+:root[data-theme="pneuma"] .rail{background:rgba(255,255,255,.4)}
+.tabs{position:relative;display:flex;flex-direction:column;gap:3px}
+.ind{position:absolute;left:0;right:0;border-radius:12px;
+  background:linear-gradient(160deg,rgba(143,220,255,.36),rgba(74,163,255,.14));border:1px solid rgba(143,220,255,.4);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 6px 16px -6px var(--hydro)}
+.ind::before{content:"";position:absolute;left:-10px;top:50%;width:6px;height:6px;margin-top:-3px;transform:rotate(45deg);background:var(--gold);box-shadow:0 0 8px var(--gold)}
+.ind::after{content:"";position:absolute;left:5px;top:4px;width:8px;height:4px;border-radius:50%;background:rgba(255,255,255,.55);filter:blur(.5px)}
+.tab{position:relative;width:34px;height:34px;border-radius:11px;display:grid;place-items:center;cursor:pointer;color:var(--mute);transition:color .4s}
+.tab svg{width:17px;height:17px;transition:transform .5s var(--pop)}
+.tab:hover{color:var(--text)}.tab:hover svg{transform:translateY(-1px) scale(1.08)}
+.tab:active svg{transform:scale(.85)}
+.tab.on{color:var(--text)}.tab.on svg{filter:drop-shadow(0 0 5px var(--aqua))}
+.tab.jump svg{animation:tabJump .5s var(--pop)}
+@keyframes tabJump{40%{transform:translateY(-3px) scale(1.15,.92)}70%{transform:scale(.96,1.06)}}
+.tip{position:absolute;left:44px;top:50%;translate:0 -50%;white-space:nowrap;pointer-events:none;z-index:9;background:var(--panel2);border:1px solid var(--line);color:var(--text);
+  font:500 11.5px Outfit;padding:4px 9px;border-radius:7px;box-shadow:0 8px 20px -6px var(--shadow);opacity:0;transform:translateX(-4px);transition:.35s var(--flow)}
+.tab:hover .tip{opacity:1;transform:none}
+
+/* ---------------- main ---------------- */
+.main{position:relative;z-index:2;display:grid;grid-template-rows:50px 1fr 26px;min-width:0}
+.head{display:flex;align-items:center;gap:7px;padding:0 22px 0 16px;border-bottom:1px solid var(--line);cursor:grab;touch-action:none}
+.head:active{cursor:grabbing}
+.head .logo{display:none;width:28px;height:32px;margin-right:2px}
+.act{line-height:1;min-width:0}
+.act small{display:block;font:600 9.5px Outfit;letter-spacing:.32em;color:var(--gold)}
+.act b{display:block;margin-top:4px;font:700 17px Cinzel,serif;letter-spacing:.06em;white-space:nowrap;background:linear-gradient(100deg,var(--text) 0 40%,var(--aqua) 48%,var(--text) 56% 100%);
+  background-size:260% 100%;-webkit-background-clip:text;color:transparent;animation:shine 6s linear infinite}
+@keyframes shine{from{background-position:100% 0}to{background-position:-160% 0}}
+.act b.swap{animation:shine 6s linear infinite,surf .6s var(--flow)}
+.brand{margin-left:auto;font:500 10px Outfit;letter-spacing:.2em;color:var(--mute);text-transform:uppercase}
+.sbox{display:flex;align-items:center;height:28px;border-radius:9px;border:1px solid var(--line);background:var(--track);width:28px;overflow:hidden;transition:width .5s var(--flow),border-color .3s}
+.sbox.open{width:150px;border-color:var(--aqua)}
+.sbox svg{flex:none;width:28px;height:13px;color:var(--mute);cursor:pointer}
+.sbox input{width:110px;background:none;border:0;outline:0;color:var(--text);font:400 12px Outfit}
+.ib{width:28px;height:28px;border-radius:9px;border:1px solid var(--line);background:var(--track);display:grid;place-items:center;cursor:pointer;color:var(--mute);transition:.35s var(--pop)}
+.ib svg{width:12px;height:12px;transition:transform .45s var(--pop)}
+.ib:hover{color:var(--aqua);border-color:var(--aqua);transform:translateY(-1px)}
+.ib:active{transform:scale(.86)}
+.ib.x:hover{color:#ff8796;border-color:#ff8796}
+.ib.x:hover svg{transform:rotate(90deg)}
+.ib.mn:hover svg{transform:scaleX(.6)}
+.mode{flex:none;position:relative;width:52px;height:26px;border-radius:14px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:0 6px;font-size:12px;
+  background:var(--track);border:1px solid var(--gold);overflow:hidden;transition:transform .35s var(--pop)}
+.mode:active{transform:scale(.92)}
+.mode span{position:relative;z-index:1;line-height:1;transition:opacity .4s,color .4s}
+.mode .moon{color:#fff}.mode .sun{color:var(--gold);opacity:.5}
+.mode i{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#7fb6ff,#1d4ca8 70%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.25),0 2px 6px rgba(0,0,0,.35);transition:transform .6s var(--pop),background .5s}
+:root[data-theme="pneuma"] .mode i{transform:translateX(26px);background:radial-gradient(circle at 35% 30%,#fff7df,#dcb871 75%)}
+:root[data-theme="pneuma"] .mode .moon{color:var(--mute);opacity:.5}
+:root[data-theme="pneuma"] .mode .sun{color:#7a5a18;opacity:1}
+
+.body{position:relative;overflow:hidden}
+.page{position:absolute;inset:0;overflow-y:auto;padding:10px 12px 14px;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:max-content;gap:7px;align-content:start;
+  scrollbar-width:thin;scrollbar-color:rgba(143,220,255,.25) transparent;-webkit-overflow-scrolling:touch}
+.page>*{animation:surf .6s var(--flow) both}
+@keyframes surf{from{opacity:0;transform:translateY(14px);filter:blur(4px)}to{opacity:1;transform:none;filter:blur(0)}}
+.page.leave{animation:sink .3s var(--soft) forwards}
+@keyframes sink{to{opacity:0;transform:translateY(10px);filter:blur(4px)}}
+.sec{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin-top:5px;font:600 9.5px Outfit;letter-spacing:.3em;color:var(--gold);text-transform:uppercase}
+.sec:first-child{margin-top:0}
+.sec::before{content:"";width:5px;height:5px;transform:rotate(45deg);border:1px solid var(--gold)}
+.sec::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold),transparent);opacity:.45}
+
+/* tiles */
+.it{position:relative;border-radius:11px;padding:8px 10px;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;justify-content:center;
+  background:var(--panel);border:1px solid var(--line);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 2px 0 var(--shadow);transition:border-color .4s,background .5s,transform .45s var(--pop),box-shadow .4s}
+.it::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .4s;
+  background:radial-gradient(150px circle at var(--mx,50%) var(--my,50%),rgba(143,220,255,.16),transparent 65%)}
+.it:hover{border-color:rgba(143,220,255,.3);transform:translateY(-2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 8px 16px -8px var(--shadow)}
+.it:hover::after{opacity:1}
+.it.press{animation:press .45s var(--pop)}
+@keyframes press{0%{transform:scale(.965)}55%{transform:scale(1.012)}100%{transform:none}}
+.it.w{grid-column:1/-1}
+.it .r{position:relative;z-index:1;display:flex;align-items:center;gap:8px;min-height:20px}
+.lbl{flex:1;min-width:0}
+.lbl .n{display:block;font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .3s}
+.lbl .d{display:none;font-size:11px;color:var(--mute);margin-top:2px;line-height:1.3}
+.it .v{font:600 11.5px Outfit;color:var(--aqua)}
+.peb{position:absolute;width:10px;height:10px;margin:-5px;border-radius:50%;border:1.5px solid var(--aqua);pointer-events:none;animation:peb .9s var(--flow) both}
+@keyframes peb{0%{opacity:.8;transform:scale(.2)}100%{opacity:0;transform:scale(15)}}
+
+/* switch: water fill, bubble knob that stretches like a drop while it travels */
+.sw{position:relative;width:38px;height:20px;border-radius:12px;background:var(--track);border:1px solid var(--line);flex:none;overflow:hidden;transition:border-color .4s,box-shadow .4s}
+.sw i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#2f6fd8,var(--aqua));transition:width .55s var(--flow)}
+.sw.on i{width:100%}
+.sw b{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:8px;
+  background:radial-gradient(circle at 35% 30%,#fff 0 16%,rgba(255,255,255,.85) 36%,rgba(205,228,255,.75));box-shadow:inset 0 0 0 1px rgba(255,255,255,.55),0 1px 4px var(--shadow);
+  transition:transform .55s var(--pop)}
+.sw.on{border-color:rgba(143,220,255,.5);box-shadow:0 0 12px -3px var(--hydro)}
+.sw.on b{transform:translateX(18px)}
+.sw.go b{animation:stretch .5s var(--flow)}
+.sw.on.go b{animation-name:stretchR}
+@keyframes stretch{40%{width:20px}}
+@keyframes stretchR{40%{width:20px;margin-left:-6px}}
+
+/* slider */
+.sl{position:relative;z-index:1;height:14px;margin-top:6px;cursor:ew-resize;touch-action:none}
+.sl .tr{position:absolute;left:0;right:0;top:5px;height:4px;border-radius:4px;background:var(--track)}
+.sl .fl{position:absolute;left:0;top:5px;height:4px;border-radius:4px;background:linear-gradient(90deg,#2f6fd8,var(--aqua),#2f6fd8);background-size:200% 100%;animation:flow 3s linear infinite;box-shadow:0 0 8px rgba(143,220,255,.45)}
+@keyframes flow{to{background-position:-200% 0}}
+.sl .th{position:absolute;top:0;width:14px;height:14px;margin-left:-7px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#fff 0 18%,rgba(255,255,255,.85) 38%,rgba(190,225,255,.75));border:1.5px solid var(--aqua);transition:transform .4s var(--pop),box-shadow .4s}
+.sl:hover .th,.sl.drag .th{transform:scale(1.25);box-shadow:0 0 0 5px rgba(143,220,255,.14)}
+
+/* segmented choice with a liquid pill */
+.seg{position:relative;display:flex;background:var(--track);border-radius:9px;padding:2px;flex:none}
+.seg span{position:relative;z-index:1;padding:3px 11px;font-size:11.5px;color:var(--mute);cursor:pointer;transition:color .35s}
+.seg span.on{color:#fff}
+.seg em{position:absolute;top:2px;bottom:2px;border-radius:7px;background:linear-gradient(160deg,var(--aqua),var(--hydro) 60%,#2a5fc4);box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+
+/* keycap */
+.key{flex:none;min-width:34px;text-align:center;padding:2px 7px;border-radius:6px;font:600 11px Outfit;color:var(--gold);border:1px solid var(--gold);background:var(--track);
+  box-shadow:0 2px 0 var(--gold);transition:transform .12s,box-shadow .12s,color .3s,border-color .3s}
+.it:active .key{transform:translateY(2px);box-shadow:0 0 0 var(--gold)}
+.key.listen{color:var(--aqua);border-color:var(--aqua);box-shadow:0 2px 0 var(--aqua);animation:breathe 1.4s ease-in-out infinite}
+@keyframes breathe{50%{box-shadow:0 2px 0 var(--aqua),0 0 0 5px rgba(143,220,255,.15)}}
+
+/* action buttons: water floods from the tap, the arrow swims out, a check draws in */
+.bi{position:relative;flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;border:1px solid rgba(143,220,255,.35);color:var(--aqua);overflow:hidden;
+  transition:background .35s,border-color .35s,box-shadow .35s,color .3s,transform .45s var(--pop)}
+.bi svg{position:absolute;width:13px;height:13px;transition:transform .45s var(--flow),opacity .3s}
+.bi .ck{opacity:0;transform:scale(.4)}
+.bi .ck path{stroke-dasharray:24;stroke-dashoffset:24}
+.it.btn:hover .bi{background:rgba(143,220,255,.14);border-color:var(--aqua);transform:scale(1.08)}
+.it.btn:hover .ar{transform:translateX(2px)}
+.it.btn.done .bi{background:var(--hydro);border-color:var(--aqua);color:#fff;box-shadow:0 0 0 4px rgba(74,163,255,.18),0 0 14px -2px var(--hydro)}
+.it.btn.done .ar{transform:translateX(24px);opacity:0}
+.it.btn.done .ck{opacity:1;transform:none}
+.it.btn.done .ck path{animation:draw .4s .12s var(--flow) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.flood{position:absolute;border-radius:50%;pointer-events:none;background:radial-gradient(circle,rgba(74,163,255,.32),rgba(74,163,255,.12) 60%,transparent 72%);
+  transform:scale(0);animation:flood .9s var(--flow) forwards}
+@keyframes flood{60%{transform:scale(1);opacity:1}100%{transform:scale(1);opacity:0}}
+.it.danger .bi{color:#ff8f9c;border-color:rgba(255,143,156,.4)}
+.it.danger .flood{background:radial-gradient(circle,rgba(255,110,130,.3),rgba(255,110,130,.1) 60%,transparent 72%)}
+.it.danger.done .bi{background:#e0566a;border-color:#ff8f9c;box-shadow:0 0 0 4px rgba(255,110,130,.18)}
+.it.danger.armed{border-color:#ff8f9c;animation:shake .4s}
+.it.danger.armed .n{color:#ff8f9c}
+.it.danger.armed .bi{animation:throb .8s ease-in-out infinite}
+@keyframes shake{20%{transform:translateX(-3px)}40%{transform:translateX(3px)}60%{transform:translateX(-2px)}80%{transform:translateX(1px)}}
+@keyframes throb{50%{box-shadow:0 0 0 5px rgba(255,110,130,.2)}}
+.arm{position:absolute;left:0;bottom:0;height:2px;width:0;background:#ff8f9c;z-index:2}
+.armed .arm{animation:drain 2.6s linear forwards}
+@keyframes drain{from{width:100%}to{width:0}}
+
+.in{flex:none;width:58%;background:var(--track);border:1px solid var(--line);border-radius:7px;padding:4px 8px;color:var(--text);font:400 12px Outfit;outline:0;transition:.4s}
+.in:focus{border-color:var(--aqua);box-shadow:0 0 0 3px rgba(143,220,255,.12)}
+.note{grid-column:1/-1;display:flex;gap:8px;font-size:11.5px;line-height:1.45;color:var(--mute);padding:8px 10px;border-radius:10px;border:1px dashed var(--gold);background:linear-gradient(135deg,rgba(220,184,113,.08),transparent)}
+.note b{color:var(--gold);font-family:Cinzel,serif}
+.sw2{flex:none;width:28px;height:16px;border-radius:5px;background:var(--c);border:1.5px solid rgba(255,255,255,.75);box-shadow:0 0 10px -2px var(--c);transition:transform .4s var(--pop)}
+.it:hover .sw2{transform:scale(1.1)}
+.pop{position:fixed;z-index:30;width:190px;padding:9px;border-radius:12px;background:var(--panel2);border:1px solid var(--aqua);box-shadow:0 16px 40px -10px rgba(0,0,0,.6);animation:surf .45s var(--flow)}
+.pop .svb{position:relative;height:100px;border-radius:7px;cursor:crosshair;touch-action:none;background:linear-gradient(0deg,#000,transparent),linear-gradient(90deg,#fff,hsl(var(--h),100%,50%))}
+.pop .hue{position:relative;height:12px;margin-top:8px;border-radius:6px;cursor:ew-resize;touch-action:none;background:linear-gradient(90deg,red,#ff0,lime,cyan,blue,#f0f,red)}
+.pop .k{position:absolute;width:12px;height:12px;margin:-6px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 3px #000;pointer-events:none}
+.pop .hue .k{top:50%}
+.pop .pre{display:flex;gap:5px;margin-top:8px}
+.pop .pre i{flex:1;height:16px;border-radius:4px;cursor:pointer;transition:transform .4s var(--pop)}
+.pop .pre i:hover{transform:translateY(-2px)}
+
+.foot{display:flex;align-items:center;gap:6px;padding:0 24px 0 12px;border-top:1px solid var(--line);font-size:10.5px;color:var(--mute);overflow:hidden;white-space:nowrap;background:rgba(0,0,0,.08)}
+.foot .help{animation:surf .45s var(--flow)}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:9px;background:rgba(74,163,255,.16);border:1px solid rgba(143,220,255,.25);color:var(--text);animation:surf .5s var(--flow)}
+.chip::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--aqua);box-shadow:0 0 6px var(--aqua)}
+.foot .k{margin-left:auto;color:var(--gold);letter-spacing:.1em}
+
+/* drips (only when flung fast) */
+.drip{position:absolute;left:0;top:0;width:7px;height:9px;margin:-4px -3px;border-radius:50% 50% 50% 50%/60% 60% 40% 40%;
+  background:radial-gradient(circle at 35% 35%,#fff 0 12%,#8fdcff 40%,#3b86e8);box-shadow:0 0 6px rgba(143,220,255,.6)}
+.splat{position:absolute;width:14px;height:4px;margin:-2px -7px;border-radius:50%;border:1.5px solid rgba(143,220,255,.7);animation:splat .5s ease-out forwards}
+@keyframes splat{to{transform:scale(3);opacity:0}}
+
+/* launcher + toasts */
+.fab{position:fixed;left:20px;bottom:20px;width:54px;height:54px;border-radius:50%;z-index:40;display:grid;place-items:center;cursor:pointer;
+  background:radial-gradient(circle at 32% 28%,rgba(255,255,255,.4) 0 8%,rgba(143,220,255,.25) 22%,rgba(42,95,196,.55) 70%,rgba(11,23,54,.85));
+  border:1px solid rgba(220,184,113,.7);box-shadow:inset 0 -6px 14px rgba(0,0,0,.25),0 10px 26px -8px rgba(74,163,255,.8);
+  opacity:0;transform:translateY(30px) scale(.6);pointer-events:none;transition:opacity .5s,transform .7s var(--pop)}
+.fab.show{opacity:1;transform:none;pointer-events:auto;animation:float 4s ease-in-out .8s infinite}
+.fab:active{scale:.9}
+@keyframes float{50%{translate:0 -5px}}
+.fab svg{width:28px;height:32px}
+.toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column-reverse;gap:8px;z-index:45;width:250px}
+.toast{position:relative;display:flex;align-items:center;gap:10px;padding:9px 12px 11px;border-radius:12px;overflow:hidden;
+  background:linear-gradient(140deg,rgba(26,52,112,.96),rgba(9,18,44,.96));border:1px solid rgba(143,220,255,.3);color:#eef4ff;
+  box-shadow:0 14px 30px -10px rgba(0,0,0,.6);animation:tin .6s var(--pop) both}
+@keyframes tin{from{opacity:0;transform:translateY(16px) scale(.92)}}
+.toast.out{animation:sink .45s var(--soft) forwards}
+.toast svg{width:20px;height:24px;flex:none}
+.toast b{display:block;font:700 12.5px Cinzel,serif;letter-spacing:.04em;color:#dcb871}
+.toast p{font-size:11.5px;color:#b9c9e8}
+.toast .bar{position:absolute;left:0;bottom:0;height:2px;background:linear-gradient(90deg,#2f6fd8,#8fdcff);animation:bar linear forwards}
+@keyframes bar{from{width:100%}to{width:0}}
+
+/* ---------------- phone layout ---------------- */
+body.phone .win{width:352px;height:640px}
+body.phone .inner{grid-template-columns:1fr;grid-template-rows:1fr 60px}
+body.phone .rail{grid-row:2;grid-column:1;flex-direction:row;justify-content:center;padding:0 8px;border-right:0;border-top:1px solid var(--line)}
+body.phone .rail>.logo{display:none}
+body.phone .tabs{flex-direction:row;gap:4px}
+body.phone .tab{width:36px;height:42px}
+body.phone .tab svg{width:19px;height:19px}
+body.phone .ind::before{left:50%;top:auto;bottom:-9px;margin:0 0 0 -3px}
+body.phone .tip{display:none}
+body.phone .main{grid-row:1;grid-template-rows:56px 1fr}
+body.phone .head{padding:0 18px 0 12px;gap:6px}
+body.phone .head .logo{display:block}
+body.phone .brand{display:none}
+body.phone .act b{font-size:16px}
+body.phone .sbox{margin-left:auto}
+body.phone .sbox.open{width:120px}
+body.phone .sbox input{width:84px}
+body.phone .ib,body.phone .sbox{width:32px;height:32px}
+body.phone .mode{width:56px;height:30px}
+body.phone .mode i{width:24px;height:24px}
+:root[data-theme="pneuma"] body.phone .mode i{transform:translateX(26px)}
+body.phone .page{grid-template-columns:1fr;padding:10px 12px 18px;gap:8px}
+body.phone .it{padding:11px 12px;min-height:48px}
+body.phone .lbl .n{font-size:13.5px}
+body.phone .lbl .d{display:block}
+body.phone .it.w .r{flex-wrap:wrap}
+body.phone .in{width:100%}
+body.phone .sw{width:44px;height:24px}
+body.phone .sw b{width:18px;height:18px;border-radius:10px}
+body.phone .sw.on b{transform:translateX(20px)}
+body.phone .sl{height:20px;margin-top:8px}
+body.phone .sl .tr,body.phone .sl .fl{top:8px}
+body.phone .sl .th{width:20px;height:20px;margin-left:-10px}
+body.phone .bi{width:30px;height:30px}
+body.phone .key{padding:4px 10px;font-size:12px}
+body.phone .seg span{padding:5px 14px;font-size:12.5px}
+body.phone .foot{display:none}
+body.phone .say{left:40px}
+body.phone .toasts{left:50%;right:auto;top:16px;bottom:auto;width:300px;margin-left:-150px;flex-direction:column}
+body.phone .fab{width:60px;height:60px}
+</style>
+</head>
+<body>
+<div class="top"><span>Furina UI <b>v5</b> · fling the header · <b>RightShift</b> hide/show · try the <b>Panic</b> and <b>Save</b> buttons</span>
+  <button id="phoneBtn">📱 Phone view</button><button id="replay">↻ Intro</button></div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="ripple"><feTurbulence type="fractalNoise" baseFrequency="0.008 0.09" numOctaves="2" seed="4">
+      <animate attributeName="baseFrequency" dur="5s" values="0.008 0.09;0.011 0.12;0.008 0.09" repeatCount="indefinite"/></feTurbulence>
+      <feDisplacementMap in="SourceGraphic" scale="9"/></filter>
+    <linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9eeff"/><stop offset=".45" stop-color="#4aa3ff"/><stop offset="1" stop-color="#16398c"/></linearGradient>
+    <linearGradient id="es" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".6"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <clipPath id="ec"><path d="M20 3C26 12 33 18 33 26a13 13 0 0 1-26 0C7 18 14 12 20 3Z"/></clipPath>
+    <symbol id="emb" viewBox="0 0 40 42">
+      <path d="M20 3C26 12 33 18 33 26a13 13 0 0 1-26 0C7 18 14 12 20 3Z" fill="url(#eg)"/>
+      <g clip-path="url(#ec)">
+        <rect x="-24" y="0" width="12" height="42" fill="url(#es)" transform="skewX(-18)"><animate attributeName="x" values="-24;56;56" keyTimes="0;.35;1" dur="4.5s" repeatCount="indefinite"/></rect>
+        <path d="M4 31q4-2.6 8 0t8 0 8 0 8 0" fill="none" stroke="#fff" stroke-opacity=".3" stroke-width="1"/>
+      </g>
+      <path d="M20 3C26 12 33 18 33 26a13 13 0 0 1-26 0C7 18 14 12 20 3Z" fill="none" stroke="#dcb871" stroke-width="1.4"/>
+      <text x="20.4" y="31" text-anchor="middle" font-family="Cinzel,serif" font-weight="700" font-size="15" fill="#fff" style="paint-order:stroke" stroke="#16398c" stroke-width="1.6">F</text>
+      <ellipse cx="14" cy="19" rx="1.7" ry="3.4" transform="rotate(28 14 19)" fill="#fff" fill-opacity=".7"/>
+      <path d="M33 4l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z" fill="#dcb871"/>
+    </symbol>
+    <symbol id="orn" viewBox="0 0 30 30"><g fill="none" stroke="#dcb871" stroke-width="1.1">
+      <path d="M2 28V10Q2 2 10 2h18"/><path d="M6 24V12q0-6 6-6h12"/><path d="M10 10q4 0 4 4t-4 4"/>
+      <circle cx="10" cy="10" r="1.6" fill="#dcb871"/><path d="M2 28l2-3M28 2l-3 2"/></g></symbol>
+  </defs>
+</svg>
+
+<div class="intro" id="intro">
+  <div class="iline"></div><div class="irings"><i></i><i></i><i></i></div><div class="idrop"></div>
+  <div class="ilogo"><h1>FURINA</h1><h1 class="refl" aria-hidden="true">FURINA</h1><p>HYDRO INTERFACE</p></div>
+</div>
+
+<div class="stage"><div class="fit" id="fit"><div class="device" id="device"><div class="wob" id="wob"><div class="say" id="say"></div>
+<div class="win" id="win"><div class="inner" id="inner">
+  <div class="fx" id="fx1"><div class="caustic"></div><div class="caustic b"></div><div class="damask"></div></div>
+  <svg class="orn tl"><use href="#orn"/></svg><svg class="orn tr"><use href="#orn"/></svg>
+  <svg class="orn bl"><use href="#orn"/></svg><svg class="orn br"><use href="#orn"/></svg>
+  <nav class="rail">
+    <div class="logo" title="Furina Hub"><svg><use href="#emb"/></svg></div>
+    <div class="tabs" id="tabs"><div class="ind" id="ind"></div></div>
+  </nav>
+  <section class="main">
+    <header class="head" id="head">
+      <div class="logo"><svg><use href="#emb"/></svg></div>
+      <div class="act"><small id="actNo">ACT I</small><b id="actName">Combat</b></div>
+      <span class="brand">Furina Hub</span>
+      <div class="sbox" id="sbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" placeholder="Search..."></div>
+      <div class="mode" id="mode" title="Ousia (dark) / Pneuma (light)"><i></i><span class="moon">☾</span><span class="sun">☀</span></div>
+      <div class="ib mn" id="minB"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path d="M5 12h14"/></svg></div>
+      <div class="ib x" id="xB"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path d="M6 6l12 12M18 6 6 18"/></svg></div>
+    </header>
+    <div class="body" id="body"></div>
+    <footer class="foot" id="foot"></footer>
+  </section>
+</div></div></div></div></div></div>
+
+<div id="drips" style="position:fixed;inset:0;pointer-events:none;z-index:35"></div>
+<div class="fab" id="fab"><svg><use href="#emb"/></svg></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+const $=s=>document.querySelector(s),win=$('#win'),fab=$('#fab'),wob=$('#wob');
+const ICON={
+ combat:'<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="m13 19 6-6M16 16l4 4M19 21l2-2"/><path d="M9.5 6.5 21 18v3h-3l-1.5-1.5"/>',
+ esp:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+ power:'<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+ hitbox:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>',
+ luck:'<rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="16" cy="16" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/>',
+ visuals:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+ move:'<path d="M17.7 7.7A2.5 2.5 0 1 1 19.5 12H2M9.6 4.6A2 2 0 1 1 11 8H2M12.6 19.4A2 2 0 1 0 14 16H2"/>',
+ misc:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'};
+const svg=k=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>`;
+const pick=a=>a[Math.random()*a.length|0];
+
+/* same features as the real hub */
+const T=(n,d,v)=>({t:'tog',n,d,v:!!v}),S=(n,lo,hi,v,u='',d)=>({t:'sld',n,lo,hi,v,u,d}),D=(n,o,v,d)=>({t:'dd',n,o,v,d}),K=(n,d,v)=>({t:'key',n,d,v}),
+ B=(n,d,x)=>({t:'btn',n,d,x}),C=(n,v)=>({t:'col',n,v}),I=(n,d,p)=>({t:'inp',n,d,p}),H=n=>({t:'sec',n}),N=n=>({t:'note',n});
+const TABS=[
+ ['Combat','combat',[H('Kill Aura'),T('Kill Aura','Auto-hits every enemy in range with your equipped weapon',1),K('Aura Key','Press to toggle the aura','X'),
+   S('Aura Range',5,150,12,' st'),S('Aura Delay',3,100,12,'0 ms'),T('Hit All In Range','Off = only the closest enemy',1),T('Lowest HP First','Prioritise weak targets'),
+   T('Auto Equip','Equips your weapon before swinging',1),S('Max Targets',1,10,5),H('Targeting'),I('Ignore','Names the aura will never hit','friend1, friend2'),
+   T('Face Target','Turns you toward the closest enemy'),T('Stick To Target','Stays behind the closest enemy'),B('Teleport To Nearest','Jump behind the closest enemy')]],
+ ['ESP','esp',[H('Master'),T('Player ESP','Master switch for everything below',1),K('ESP Key','Toggle ESP','Z'),S('Max Distance',100,5000,1500,' st'),
+   H('Boxes'),D('Box Style',['Corners','Full'],'Corners'),S('Box Thickness',1,4,1),T('Boxes','Draw a box around enemies',1),T('Box Fill','Tinted fill inside the box'),
+   H('Info'),T('Names',null,1),T('Health Bar',null,1),T('Distance',null,1),T('Attack Warning','Flags enemies that are mid-swing',1),
+   H('Colors'),C('Base Color','#78aaff'),C('Visible Color','#5aff78'),C('Target Color','#ff4646'),T('Rainbow','Cycles every ESP color')]],
+ ['Power','power',[H('Aim'),T('Aimlock','Turns the camera to the nearest enemy inside the circle'),T('FOV Circle','Shows the aim circle',1),S('Aim FOV',30,600,180,' px'),S('Smoothness',1,20,4),
+   H('Defense'),T('Auto Dodge','Sidesteps when a nearby enemy swings at you'),T('Proximity Alert','Nearest enemy at the top of the screen',1),T('Anti Slow','Swing slowdowns stop reducing your speed'),T('Anti Knockback','Cancels most knockback'),
+   H('Encore'),K('Panic Key','Turns every feature off at once','Del'),B('Panic Now','Turns every feature off',1)]],
+ ['Hitbox','hitbox',[T('Bigger Hitbox','Enlarges your weapon hitbox on every swing'),S('Hitbox Size',1,10,2,'x'),T('Show Hitbox','Draws the swing box in neon'),
+   T('Spoof Size','Riskier: the server sees a mismatched number'),N('<b>Note</b>&nbsp; Hit detection runs on your client, so a bigger box catches more enemies. Whether the server accepts far hits is unverified.')]],
+ ['Luck','luck',[N('<b>Note</b>&nbsp; Rolls are decided on the server, so luck cannot be raised. This tab rolls for you and stops on the rarity you choose.'),
+   D('Chest',['Basic','Divine'],'Divine'),T('Auto Roll','Rolls repeatedly. Spends your currency'),S('Stop At Rarity',1,5,4),S('Max Rolls',1,200,50),S('Roll Delay',3,40,12,'00 ms'),B('Roll Status','Rolls so far and best rarity')]],
+ ['Visuals','visuals',[T('HUD','Top-left status line',1),T('Fullbright','Removes darkness'),T('Custom FOV','Overrides camera field of view'),S('FOV',30,120,70,'°')]],
+ ['Movement','move',[T('Speed','Custom walk speed'),S('Walk Speed',16,120,24),T('Jump Power','Custom jump height'),S('Jump Value',38,200,60),T('Infinite Jump','Jump in mid-air'),T('Noclip','Walk through walls'),T('Fly','WASD + Space / Shift'),S('Fly Speed',20,200,60)]],
+ ['Misc','misc',[H('Performance'),T('FPS Boost','Everything it changes is restored when off'),T('Remove Effects','Particles, trails, shadows',1),T('Custom FPS Cap','Off puts the cap back to 60'),S('FPS Cap',30,360,144),
+   H('Config'),T('Auto Save','Saves a moment after any change',1),I('Config Name','Letters, numbers, - and _ only','silent_assassins'),B('Save Config','Save under the name above'),B('Load Config','Load the name above'),
+   H('Curtain Call'),B('Rejoin Server','Rejoin this server'),B('Unload Hub','Turns everything off and removes the menu',1)]]];
+const ROMAN=['I','II','III','IV','V','VI','VII','VIII'];
+
+const foot=$('#foot');let hoverTxt='';
+function renderFoot(){
+  if(hoverTxt){foot.innerHTML=`<span class="help">${hoverTxt}</span><span class="k">RShift</span>`;return}
+  const on=TABS.flatMap(t=>t[2]).filter(x=>x.t==='tog'&&x.v).slice(0,4).map(x=>`<span class="chip">${x.n}</span>`).join('');
+  foot.innerHTML=(on||'<span>No features on</span>')+'<span class="k">RShift</span>';
+}
+function toast(title,text,dur=2600){
+  const el=document.createElement('div');el.className='toast';
+  el.innerHTML=`<svg><use href="#emb"/></svg><div><b>${title}</b><p>${text}</p></div><div class="bar" style="animation-duration:${dur}ms"></div>`;
+  $('#toasts').appendChild(el);setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),450)},dur);
+}
+const say=(()=>{const el=$('#say');let t;return(txt,ms=1500)=>{el.textContent=txt;el.classList.add('on');clearTimeout(t);t=setTimeout(()=>el.classList.remove('on'),ms)}})();
+const local=(e,el)=>{const r=el.getBoundingClientRect(),k=r.width/el.offsetWidth;return[(e.clientX-r.left)/k,(e.clientY-r.top)/k]};
+const replay=(el,c)=>{el.classList.remove(c);void el.offsetWidth;el.classList.add(c)};
+function pebble(e,el){const [x,y]=local(e,el);
+  for(let i=0;i<2;i++){const d=document.createElement('span');d.className='peb';d.style.left=x+'px';d.style.top=y+'px';d.style.animationDelay=i*140+'ms';el.appendChild(d);setTimeout(()=>d.remove(),1100)}}
+function flood(e,el){const [x,y]=local(e,el),s=Math.max(el.offsetWidth,el.offsetHeight)*2.4,d=document.createElement('span');d.className='flood';
+  d.style.cssText=`width:${s}px;height:${s}px;left:${x-s/2}px;top:${y-s/2}px`;el.appendChild(d);setTimeout(()=>d.remove(),950)}
+
+const ARROW='<svg class="ar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+const CHECK='<svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const lbl=it=>`<div class="lbl"><span class="n">${it.n}</span>${it.d?`<small class="d">${it.d}</small>`:''}</div>`;
+function tile(html,cls=''){const d=document.createElement('div');d.className='it '+cls;d.innerHTML=html;return d}
+function build(it){
+  if(it.t==='sec'){const s=document.createElement('div');s.className='sec';s.textContent=it.n;return s}
+  if(it.t==='note'){const s=document.createElement('div');s.className='note';s.innerHTML=it.n;return s}
+  let d;
+  if(it.t==='tog'){d=tile(`<div class="r">${lbl(it)}<span class="sw ${it.v?'on':''}"><i></i><b></b></span></div>`);
+    d.onclick=e=>{pebble(e,d);replay(d,'press');it.v=!it.v;const w=d.querySelector('.sw');w.classList.toggle('on',it.v);replay(w,'go');renderFoot();
+      if(/Kill Aura|Player ESP|Fly|FPS Boost/.test(it.n))toast(it.n,it.v?'Enabled':'Disabled')}}
+  if(it.t==='sld'){d=tile(`<div class="r">${lbl(it)}<span class="v"></span></div><div class="sl"><div class="tr"></div><div class="fl"></div><div class="th"></div></div>`);
+    const sl=d.querySelector('.sl'),set=v=>{it.v=Math.round(Math.min(it.hi,Math.max(it.lo,v)));const p=(it.v-it.lo)/(it.hi-it.lo)*100;
+      sl.querySelector('.fl').style.width=p+'%';sl.querySelector('.th').style.left=p+'%';d.querySelector('.v').textContent=it.v+it.u};
+    const mv=e=>{const r=sl.getBoundingClientRect();set(it.lo+(e.clientX-r.left)/r.width*(it.hi-it.lo))};
+    sl.onpointerdown=e=>{sl.classList.add('drag');sl.setPointerCapture(e.pointerId);mv(e);sl.onpointermove=mv};
+    sl.onpointerup=sl.onpointercancel=()=>{sl.classList.remove('drag');sl.onpointermove=null};set(it.v)}
+  if(it.t==='dd'){d=tile(`<div class="r">${lbl(it)}<span class="seg"><em></em>${it.o.map(o=>`<span>${o}</span>`).join('')}</span></div>`,'w');
+    const seg=d.querySelector('.seg'),em=seg.querySelector('em'),opts=[...seg.querySelectorAll('span')];let curL=null;
+    const sel=o=>{const L=o.offsetLeft,R=seg.clientWidth-(o.offsetLeft+o.offsetWidth);
+      if(curL===null)em.style.transition='none';
+      else{const f='.28s cubic-bezier(.5,0,.2,1)',s='.55s cubic-bezier(.5,0,.2,1) .05s';em.style.transition=L>curL?`right ${f},left ${s}`:`left ${f},right ${s}`}
+      em.style.left=L+'px';em.style.right=R+'px';curL=L;opts.forEach(x=>x.classList.toggle('on',x===o));it.v=o.textContent};
+    opts.forEach(o=>o.onclick=e=>{e.stopPropagation();pebble(e,d);sel(o)});requestAnimationFrame(()=>sel(opts.find(o=>o.textContent===it.v)||opts[0]))}
+  if(it.t==='key'){d=tile(`<div class="r">${lbl(it)}<span class="key">${it.v}</span></div>`);const k=d.querySelector('.key');
+    d.onclick=e=>{pebble(e,d);k.classList.add('listen');k.textContent='...';const h=ev=>{ev.preventDefault();ev.stopPropagation();
+      it.v=ev.key.length===1?ev.key.toUpperCase():ev.key.replace('Arrow','');k.textContent=it.v;k.classList.remove('listen');removeEventListener('keydown',h,true);
+      toast('Keybind',`${it.n} → ${it.v}`)};addEventListener('keydown',h,true)}}
+  if(it.t==='btn'){d=tile(`<div class="r">${lbl(it)}<span class="bi">${ARROW}${CHECK}</span></div><span class="arm"></span>`,'btn'+(it.x?' danger':''));
+    let armed=null,done=null;const nm=d.querySelector('.n');
+    d.onclick=e=>{replay(d,'press');
+      if(it.x&&!armed){armed=setTimeout(()=>{armed=null;d.classList.remove('armed');nm.textContent=it.n},2600);d.classList.add('armed');nm.textContent='Tap again to confirm';return}
+      if(armed){clearTimeout(armed);armed=null;d.classList.remove('armed');nm.textContent=it.n}
+      flood(e,d);clearTimeout(done);replay(d,'done');done=setTimeout(()=>d.classList.remove('done'),1400);
+      if(it.x)say('Eek! Everything off!');toast(it.n,it.x?'Every feature has been turned off.':'Done.')}}
+  if(it.t==='inp'){d=tile(`<div class="r">${lbl(it)}<input class="in" placeholder="${it.p}"></div>`,'w');d.querySelector('input').onkeydown=e=>e.stopPropagation()}
+  if(it.t==='col'){d=tile(`<div class="r">${lbl(it)}<span class="sw2" style="--c:${it.v}"></span></div>`);d.onclick=e=>{e.stopPropagation();pebble(e,d);openPicker(d,it)}}
+  d.onmouseenter=()=>{hoverTxt=it.d||'';if(hoverTxt)renderFoot()};d.onmouseleave=()=>{if(hoverTxt){hoverTxt='';renderFoot()}};
+  return d;
+}
+$('#body').addEventListener('pointermove',e=>{const t=e.target.closest('.it');if(!t)return;const [x,y]=local(e,t);t.style.setProperty('--mx',x+'px');t.style.setProperty('--my',y+'px')});
+
+/* color popover */
+let pop=null;
+function openPicker(d,it){
+  if(pop){pop.remove();pop=null}
+  let [h,s,v]=hsv(it.v);const r=d.getBoundingClientRect();
+  pop=document.createElement('div');pop.className='pop';pop.style.left=Math.max(8,Math.min(innerWidth-200,r.left))+'px';pop.style.top=Math.min(innerHeight-175,r.bottom+6)+'px';
+  pop.innerHTML=`<div class="svb"><div class="k"></div></div><div class="hue"><div class="k"></div></div><div class="pre">${['#4aa3ff','#8fdcff','#dcb871','#ffffff','#ff4f6d','#5aff78'].map(c=>`<i style="background:${c}" data-c="${c}"></i>`).join('')}</div>`;
+  document.body.appendChild(pop);pop.onclick=e=>e.stopPropagation();
+  const sv=pop.querySelector('.svb'),hu=pop.querySelector('.hue');
+  const paint=()=>{it.v=hex(h,s,v);sv.style.setProperty('--h',h);sv.firstChild.style.cssText=`left:${s*100}%;top:${(1-v)*100}%;background:${it.v}`;
+    hu.firstChild.style.left=(h/3.6)+'%';d.querySelector('.sw2').style.setProperty('--c',it.v)};
+  const drag=(el,fn)=>{el.onpointerdown=e=>{el.setPointerCapture(e.pointerId);fn(e);el.onpointermove=fn};el.onpointerup=()=>el.onpointermove=null};
+  const c01=x=>Math.min(1,Math.max(0,x));
+  drag(sv,e=>{const b=sv.getBoundingClientRect();s=c01((e.clientX-b.left)/b.width);v=1-c01((e.clientY-b.top)/b.height);paint()});
+  drag(hu,e=>{const b=hu.getBoundingClientRect();h=c01((e.clientX-b.left)/b.width)*360;paint()});
+  pop.querySelectorAll('.pre i').forEach(i=>i.onclick=()=>{[h,s,v]=hsv(i.dataset.c);paint()});paint();
+}
+addEventListener('click',()=>{if(pop){pop.remove();pop=null}});
+function hsv(hx){const n=parseInt(hx.slice(1),16),r=(n>>16&255)/255,g=(n>>8&255)/255,b=(n&255)/255,mx=Math.max(r,g,b),d=mx-Math.min(r,g,b);
+  let h=0;if(d){h=mx===r?((g-b)/d)%6:mx===g?(b-r)/d+2:(r-g)/d+4;h*=60;if(h<0)h+=360}return[h,mx?d/mx:0,mx]}
+function hex(h,s,v){const f=n=>{const k=(n+h/60)%6;return Math.round((v-v*s*Math.max(0,Math.min(k,4-k,1)))*255)};return'#'+[f(5),f(3),f(1)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+
+/* tabs: liquid highlight (leading edge first, trailing edge catches up); vertical on desktop, horizontal on phone */
+const tabsEl=$('#tabs'),body=$('#body'),ind=$('#ind');let cur=-1,page=null,indPos=null,indAxis=null;
+TABS.forEach(([n,ic],i)=>{const t=document.createElement('div');t.className='tab';t.innerHTML=svg(ic)+`<span class="tip">${n}</span>`;
+  t.onclick=()=>{replay(t,'jump');openTab(i)};tabsEl.appendChild(t)});
+function moveInd(i){
+  const t=tabsEl.querySelectorAll('.tab')[i],hz=document.body.classList.contains('phone');
+  const a=hz?t.offsetLeft:t.offsetTop,size=hz?t.offsetWidth:t.offsetHeight,total=hz?tabsEl.clientWidth:tabsEl.clientHeight,s1=hz?'left':'top',s2=hz?'right':'bottom';
+  if(indAxis!==hz){ind.style.cssText='transition:none';ind.style[hz?'top':'left']='0px';ind.style[hz?'bottom':'right']='0px'}
+  else{const f='.26s cubic-bezier(.5,0,.2,1)',s='.55s cubic-bezier(.5,0,.2,1) .05s';ind.style.transition=a>indPos?`${s2} ${f},${s1} ${s}`:`${s1} ${f},${s2} ${s}`}
+  ind.style[s1]=a+'px';ind.style[s2]=(total-a-size)+'px';indPos=a;indAxis=hz;
+}
+function openTab(i,q='',again=false){
+  const changed=i!==cur;cur=i;
+  document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('on',j===i));moveInd(i);
+  if(changed){$('#actNo').textContent=q?'SEARCH':'ACT '+ROMAN[i];const nb=$('#actName');nb.textContent=TABS[i][0];replay(nb,'swap')}
+  if(page){const o=page;if(changed){o.classList.add('leave');setTimeout(()=>o.remove(),300)}else o.remove()}
+  const p=document.createElement('div');p.className='page';
+  const items=q?TABS.flatMap(t=>t[2]).filter(x=>x.n&&x.t!=='sec'&&x.t!=='note'&&x.n.toLowerCase().includes(q)):TABS[i][2];
+  items.forEach((it,k)=>{const el=build(it);el.style.animationDelay=((changed?200:again?250:0)+k*30)+'ms';p.appendChild(el)});
+  if(!items.length)p.innerHTML='<div class="sec">Nothing on stage by that name</div>';
+  body.appendChild(p);page=p;
+}
+$('#sbox').querySelector('svg').onclick=()=>{$('#sbox').classList.toggle('open');$('#q').focus()};
+$('#q').oninput=e=>{const q=e.target.value.trim().toLowerCase();openTab(cur,q);$('#actNo').textContent=q?'SEARCH':'ACT '+ROMAN[cur]};
+$('#q').onkeydown=e=>e.stopPropagation();
+
+/* drag: light spring, tiny lean, soft settle. Drips and a quip only on a hard fling. */
+let FK=1,tx=0,ty=0,x=0,y=0,vx=0,vy=0,dr=null,last=0,peak=0,lastSay=-1e9;const head=$('#head');
+const LAND=['Hmph. Perfect landing.','Bravo!','...I meant to do that.','Ta-da~'];
+function drip(px,py,dvx,dvy){const d=document.createElement('div');d.className='drip';$('#drips').appendChild(d);const floor=innerHeight-6;let n=0;
+  (function f(){dvy+=.45;px+=dvx;py+=dvy;n++;d.style.transform=`translate(${px}px,${py}px)`;
+    if(py>=floor||n>140){d.remove();if(py>=floor){const s=document.createElement('div');s.className='splat';s.style.left=px+'px';s.style.top=floor+'px';$('#drips').appendChild(s);setTimeout(()=>s.remove(),500)}return}
+    requestAnimationFrame(f)})()}
+head.onpointerdown=e=>{if(e.target.closest('input,.ib,.sbox,.mode,.logo'))return;dr={sx:e.clientX-tx,sy:e.clientY-ty};peak=0;head.setPointerCapture(e.pointerId)};
+head.onpointermove=e=>{if(dr){tx=e.clientX-dr.sx;ty=e.clientY-dr.sy}};
+head.onpointerup=head.onpointercancel=()=>{if(!dr)return;dr=null;
+  if(peak>12)replay(wob,'boing');
+  if(peak>20&&performance.now()-lastSay>9000){lastSay=performance.now();say(pick(LAND))}};
+wob.addEventListener('animationend',e=>{if(e.target===wob)wob.classList.remove('boing')});
+(function loop(t){
+  vx+=(tx-x)*.14;vy+=(ty-y)*.14;vx*=.74;vy*=.74;x+=vx;y+=vy;wob.style.translate=`${x/FK}px ${y/FK}px`;
+  const sp=Math.hypot(vx,vy);peak=Math.max(peak,sp);
+  if(!wob.classList.contains('boing')){const lean=Math.max(-4,Math.min(4,vx*.3)),st=Math.min(.03,sp*.0025);wob.style.transform=`rotate(${lean}deg) scale(${1+st},${1-st})`}
+  if(dr&&sp>16&&t-last>110){last=t;const r=win.getBoundingClientRect();drip(r.left+20+Math.random()*(r.width-40),r.bottom-4,-vx*.2,-vy*.15-1)}
+  requestAnimationFrame(loop)})(0);
+win.addEventListener('mousemove',e=>{const r=win.getBoundingClientRect();$('#fx1').style.transform=`translate(${-((e.clientX-r.left)/r.width-.5)*14}px,${-((e.clientY-r.top)/r.height-.5)*10}px)`});
+win.addEventListener('mouseleave',()=>$('#fx1').style.transform='');
+
+/* desktop / phone (auto on narrow screens, or the Phone view button shows it in a phone frame) */
+let forced=null;
+function layout(){
+  const real=innerWidth<640,phone=forced??real,sim=phone&&!real;
+  document.body.classList.toggle('phone',phone);document.body.classList.toggle('sim',sim);
+  FK=sim?Math.min(1,(innerHeight-60)/810,(innerWidth-24)/400):phone?Math.min(1.1,(innerWidth-12)/356,(innerHeight-12)/644):Math.min(1.25,(innerWidth-24)/544,(innerHeight-70)/376);
+  $('#fit').style.transform=`scale(${FK})`;$('#phoneBtn').textContent=phone?'🖥 Desktop view':'📱 Phone view';
+  tx=ty=x=y=vx=vy=0;if(cur>=0)moveInd(cur);
+}
+$('#phoneBtn').onclick=()=>{forced=!document.body.classList.contains('phone');if(forced===(innerWidth<640))forced=null;layout()};
+addEventListener('resize',layout);
+
+/* Ousia / Pneuma: a wave of the new colour washes across */
+$('#mode').onclick=e=>{
+  const next=document.documentElement.dataset.theme==='pneuma'?'':'pneuma';
+  const apply=()=>{if(next)document.documentElement.dataset.theme=next;else delete document.documentElement.dataset.theme};
+  const inner=$('#inner'),[cx,cy]=local({clientX:e.currentTarget.getBoundingClientRect().left+e.currentTarget.offsetWidth*FK/2,clientY:e.currentTarget.getBoundingClientRect().top+e.currentTarget.offsetHeight*FK/2},inner),
+        R=Math.hypot(inner.offsetWidth,inner.offsetHeight),w=document.createElement('div');
+  w.style.cssText=`position:absolute;inset:0;z-index:20;pointer-events:none;border-radius:15px;background:${next?'linear-gradient(160deg,#f8fbff,#e6f0ff)':'linear-gradient(160deg,#0d1a3d,#081128)'}`;
+  inner.appendChild(w);
+  w.animate([{clipPath:`circle(0px at ${cx}px ${cy}px)`},{clipPath:`circle(${R}px at ${cx}px ${cy}px)`}],{duration:650,easing:'cubic-bezier(.45,0,.2,1)',fill:'forwards'})
+   .onfinish=()=>{apply();w.animate([{opacity:1},{opacity:0}],{duration:350,fill:'forwards'}).onfinish=()=>w.remove()};
+};
+
+/* show / hide */
+let shown=false;
+function showWin(v,quiet){shown=v;win.classList.remove('min');win.classList.toggle('open',v);fab.classList.toggle('show',!v&&!quiet);if(v){const c=cur;cur=-1;openTab(c<0?0:c,'',true)}}
+$('#minB').onclick=()=>{shown=false;win.classList.add('min');win.classList.remove('open');fab.classList.add('show')};
+$('#xB').onclick=()=>{$('#minB').onclick();toast('Furina Hub','Hidden. Press RightShift or tap the drop.')};
+fab.onclick=()=>showWin(true);
+document.querySelectorAll('.logo').forEach(l=>l.onclick=()=>say(pick(['The show must go on!','Applause, please~','Did someone call for a star?'])));
+addEventListener('keydown',e=>{if(e.code==='ShiftRight')shown?$('#minB').onclick():showWin(true)});
+
+function intro(){
+  const old=$('#intro'),it=old.cloneNode(true);old.replaceWith(it);it.style.display='';
+  win.classList.remove('open','min');fab.classList.remove('show');shown=false;
+  setTimeout(()=>{it.classList.add('done');showWin(true,true)},2300);
+  setTimeout(()=>{it.style.display='none';say('Welcome back~',1600)},3100);
+}
+$('#replay').onclick=intro;layout();renderFoot();intro();
+</script>
+</body>
+</html>
