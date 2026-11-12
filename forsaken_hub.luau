@@ -1,5 +1,5 @@
 --[[
-	Furina Hub v5.7 | Forsaken (placeId 83645629621104)
+	Furina Hub v5.8 | Forsaken (placeId 83645629621104)
 	UI: FurinaUI (furina_ui.luau in this repo). Menu: RightShift. Panic (unload): End.
 	loadstring(game:HttpGet("https://raw.githubusercontent.com/banglajunaid9-ship-it/furina-hub/main/forsaken_hub.luau"))()
 	Running it again replaces the old copy. Settings save to FurinaHub/forsaken.json.
@@ -24,7 +24,7 @@ local function unload()
     genv.__FurinaHubUnload = nil
 end
 genv.__FurinaHubUnload = unload
-genv.__FurinaVersion = "5.7"
+genv.__FurinaVersion = "5.8"
 if STATE and STATE.onCleanup then STATE.onCleanup(unload) end
 local Players      = game:GetService("Players")
 local RS           = game:GetService("ReplicatedStorage")
@@ -1328,7 +1328,16 @@ end)
 -- Auto update: the GitHub copy is the source of truth. Every few minutes (and on demand) read its
 -- version line; if it is newer, notify, and with Auto Update on install it between rounds.
 ------------------------------------------------------------------------------------------------------
-local UPDATE_URL = "https://raw.githubusercontent.com/banglajunaid9-ship-it/furina-hub/main/forsaken_hub.luau"
+local REPO = "banglajunaid9-ship-it/furina-hub"
+local UPDATE_FILE = "forsaken_hub.luau"
+-- raw.githubusercontent.com/<repo>/main/... can serve a stale copy for minutes after a push, so ask the
+-- API for the newest commit and download that exact revision (falls back to main if the API is down)
+local function fetchLatestSource()
+    local okApi, body = pcall(function() return game:HttpGet("https://api.github.com/repos/" .. REPO .. "/commits/main") end)
+    local sha = okApi and type(body) == "string" and body:match('"sha"%s*:%s*"(%x+)"')
+    local url = ("https://raw.githubusercontent.com/%s/%s/%s"):format(REPO, sha or "main", UPDATE_FILE)
+    return pcall(function() return game:HttpGet(url) end)
+end
 local function versionNumber(v)
     local major, minor = tostring(v or ""):match("(%d+)%.(%d+)")
     return major and (tonumber(major) * 1000 + tonumber(minor)) or 0
@@ -1355,7 +1364,7 @@ local function installUpdate()
 end
 checkForUpdate = function(manual)
     Update.lastCheck = os.clock()
-    local ok, src = pcall(function() return game:HttpGet(UPDATE_URL .. "?t=" .. tostring(os.time())) end)
+    local ok, src = fetchLatestSource()
     if not ok or type(src) ~= "string" then
         setUpdateText("Version " .. genv.__FurinaVersion .. " - could not reach GitHub")
         if manual then notify("Updates", "Could not reach GitHub.", 4) end
