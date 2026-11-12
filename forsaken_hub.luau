@@ -1,5 +1,5 @@
 --[[
-	Furina Hub v5.6 | Forsaken (placeId 83645629621104)
+	Furina Hub v5.7 | Forsaken (placeId 83645629621104)
 	UI: FurinaUI (furina_ui.luau in this repo). Menu: RightShift. Panic (unload): End.
 	loadstring(game:HttpGet("https://raw.githubusercontent.com/banglajunaid9-ship-it/furina-hub/main/forsaken_hub.luau"))()
 	Running it again replaces the old copy. Settings save to FurinaHub/forsaken.json.
@@ -24,7 +24,7 @@ local function unload()
     genv.__FurinaHubUnload = nil
 end
 genv.__FurinaHubUnload = unload
-genv.__FurinaVersion = "5.6"
+genv.__FurinaVersion = "5.7"
 if STATE and STATE.onCleanup then STATE.onCleanup(unload) end
 local Players      = game:GetService("Players")
 local RS           = game:GetService("ReplicatedStorage")
@@ -98,7 +98,7 @@ local Cfg = {
     ItemColor = Color3.fromRGB(150, 255, 210),
     Fullbright = false, NoFog = false,
     FpsBoost = false, AutoRejoin = false, FloatingButtons = IS_MOBILE,
-    LowHpAlert = true, PanicKey = "End",
+    LowHpAlert = true, PanicKey = "End", AutoUpdate = true,
     AutoGears = false, EspGears = false, GearColor = Color3.fromRGB(255, 170, 60),
     CandyCollect = false, EspCandy = false,
     CandyColor = Color3.fromRGB(255, 120, 200),
@@ -1325,6 +1325,73 @@ task.spawn(function()
     end
 end)
 ------------------------------------------------------------------------------------------------------
+-- Auto update: the GitHub copy is the source of truth. Every few minutes (and on demand) read its
+-- version line; if it is newer, notify, and with Auto Update on install it between rounds.
+------------------------------------------------------------------------------------------------------
+local UPDATE_URL = "https://raw.githubusercontent.com/banglajunaid9-ship-it/furina-hub/main/forsaken_hub.luau"
+local function versionNumber(v)
+    local major, minor = tostring(v or ""):match("(%d+)%.(%d+)")
+    return major and (tonumber(major) * 1000 + tonumber(minor)) or 0
+end
+local checkForUpdate
+local Update = { latest = nil, src = nil, lastCheck = 0, installing = false, notified = nil }
+local updateLabel -- set once the Misc tab exists
+local function setUpdateText(t) if updateLabel then pcall(function() updateLabel:Set(t) end) end end
+local function installUpdate()
+    if Update.installing or not Update.src then return end
+    Update.installing = true
+    local fn, err = loadstring(Update.src, "=FurinaHub")
+    if not fn then
+        Update.installing = false
+        notify("Auto Update", "Downloaded update failed to load: " .. tostring(err), 6)
+        return
+    end
+    notify("Auto Update", ("Installing v%s..."):format(Update.latest), 3)
+    task.delay(1, function()
+        -- the new copy unloads this one first (it calls __FurinaHubUnload), then rebuilds the menu
+        local ok, e = pcall(fn)
+        if not ok then warn("[FurinaHub] update failed: " .. tostring(e)) end
+    end)
+end
+checkForUpdate = function(manual)
+    Update.lastCheck = os.clock()
+    local ok, src = pcall(function() return game:HttpGet(UPDATE_URL .. "?t=" .. tostring(os.time())) end)
+    if not ok or type(src) ~= "string" then
+        setUpdateText("Version " .. genv.__FurinaVersion .. " - could not reach GitHub")
+        if manual then notify("Updates", "Could not reach GitHub.", 4) end
+        return
+    end
+    local latest = src:match("Furina Hub v(%d+%.%d+)")
+    Update.latest = latest
+    if latest and versionNumber(latest) > versionNumber(genv.__FurinaVersion) then
+        Update.src = src
+        setUpdateText(("Version %s - update v%s available"):format(genv.__FurinaVersion, latest))
+        if Update.notified ~= latest or manual then
+            Update.notified = latest
+            notify("Update available", ("Furina Hub v%s is out (you have v%s).%s"):format(latest, genv.__FurinaVersion,
+                Cfg.AutoUpdate and " It installs at the end of the round." or " Turn on Auto Update or re-run the loader."), 6)
+        end
+    else
+        Update.src = nil
+        setUpdateText("Version " .. genv.__FurinaVersion .. " - up to date")
+        if manual then notify("Updates", "You have the latest version (v" .. genv.__FurinaVersion .. ").", 4) end
+    end
+end
+genv.__FurinaCheckUpdate = checkForUpdate
+task.spawn(function()
+    task.wait(8)
+    while alive do
+        if os.clock() - Update.lastCheck > 300 then pcall(checkForUpdate, false) end
+        -- install only when it can't interrupt anything: not in a round, not repairing
+        if Cfg.AutoUpdate and Update.src and myRole() ~= "Survivors" and myRole() ~= "Killers" then
+            installUpdate()
+            break
+        end
+        task.wait(5)
+    end
+end)
+
+------------------------------------------------------------------------------------------------------
 -- Settings file (FurinaHub/forsaken.json). On first run it migrates the old Maclib autosave.
 ------------------------------------------------------------------------------------------------------
 local CFG_FILE = "FurinaHub/forsaken.json"
@@ -1569,6 +1636,10 @@ end })
 MiscTab:CreateButton({ Name = "Rejoin Server", Callback = function()
     TeleportSvc:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
 end })
+head(MiscTab, "Updates")
+updateLabel = note(MiscTab, "Version " .. genv.__FurinaVersion .. " - checking GitHub...")
+tog(MiscTab, "Auto Update", "AutoUpdate", "Installs new versions from GitHub by itself, only while you are in the lobby or spectating (never mid-round)")
+MiscTab:CreateButton({ Name = "Check For Updates Now", Callback = function() task.spawn(checkForUpdate, true) end })
 head(MiscTab, "Hub")
 tog(MiscTab, "Floating Menu Button (mobile)", "FloatingButtons", "A menu button you can drag anywhere",
     function(v) if genv.__FurinaFloating then genv.__FurinaFloating.Enabled = v end end)
