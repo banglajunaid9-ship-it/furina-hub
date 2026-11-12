@@ -1,5 +1,5 @@
 --[[
-	Furina Hub v5.8 | Forsaken (placeId 83645629621104)
+	Furina Hub v5.9 | Forsaken (placeId 83645629621104)
 	UI: FurinaUI (furina_ui.luau in this repo). Menu: RightShift. Panic (unload): End.
 	loadstring(game:HttpGet("https://raw.githubusercontent.com/banglajunaid9-ship-it/furina-hub/main/forsaken_hub.luau"))()
 	Running it again replaces the old copy. Settings save to FurinaHub/forsaken.json.
@@ -24,7 +24,7 @@ local function unload()
     genv.__FurinaHubUnload = nil
 end
 genv.__FurinaHubUnload = unload
-genv.__FurinaVersion = "5.8"
+genv.__FurinaVersion = "5.9"
 if STATE and STATE.onCleanup then STATE.onCleanup(unload) end
 local Players      = game:GetService("Players")
 local RS           = game:GetService("ReplicatedStorage")
@@ -1333,7 +1333,10 @@ local UPDATE_FILE = "forsaken_hub.luau"
 -- raw.githubusercontent.com/<repo>/main/... can serve a stale copy for minutes after a push, so ask the
 -- API for the newest commit and download that exact revision (falls back to main if the API is down)
 local function fetchLatestSource()
-    local okApi, body = pcall(function() return game:HttpGet("https://api.github.com/repos/" .. REPO .. "/commits/main") end)
+    -- the time parameter matters: without it HttpGet can hand back a cached (old) answer
+    local okApi, body = pcall(function()
+        return game:HttpGet(("https://api.github.com/repos/%s/commits/main?per_page=1&_=%d"):format(REPO, os.time()))
+    end)
     local sha = okApi and type(body) == "string" and body:match('"sha"%s*:%s*"(%x+)"')
     local url = ("https://raw.githubusercontent.com/%s/%s/%s"):format(REPO, sha or "main", UPDATE_FILE)
     return pcall(function() return game:HttpGet(url) end)
