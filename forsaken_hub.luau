@@ -1,5 +1,5 @@
 --[[
-	Furina Hub v5.9 | Forsaken (placeId 83645629621104)
+	Furina Hub v6.0 | Forsaken (placeId 83645629621104)
 	UI: FurinaUI (furina_ui.luau in this repo). Menu: RightShift. Panic (unload): End.
 	loadstring(game:HttpGet("https://raw.githubusercontent.com/banglajunaid9-ship-it/furina-hub/main/forsaken_hub.luau"))()
 	Running it again replaces the old copy. Settings save to FurinaHub/forsaken.json.
@@ -24,7 +24,7 @@ local function unload()
     genv.__FurinaHubUnload = nil
 end
 genv.__FurinaHubUnload = unload
-genv.__FurinaVersion = "5.9"
+genv.__FurinaVersion = "6.0"
 if STATE and STATE.onCleanup then STATE.onCleanup(unload) end
 local Players      = game:GetService("Players")
 local RS           = game:GetService("ReplicatedStorage")
@@ -107,6 +107,10 @@ local Cfg = {
     TracerKillers = false, TracerSurvivors = false,
     FovOn = false, Fov = 90, ZoomUnlock = false,
     Overlay = false, GenAlerts = true, AutoSpectate = false,
+    AutoBlock = false, BlockRange = 13, BlockFacing = true, BlockDelay = 0, AutoParry = false,
+    SilentAim = false, CamLock = false, AimKey = "V", AimSmooth = 0.35, AimFov = 220, ShowFov = true,
+    AimMaxDist = 150, AimPredict = 0.12, AimMode = "Crosshair", AimPart = "Torso",
+    FaceTarget = false, FaceRange = 15,
 }
 local function myRole()
     local c = LP.Character
@@ -400,7 +404,7 @@ local function abilityButtons(fresh)
 end
 genv.__FurinaAbilityButtons = abilityButtons
 local function useAbilitySlot(slot)
-    local b = abilityButtons()[slot or 1]
+    local b = typeof(slot) == "Instance" and slot or abilityButtons()[slot or 1]
     if b then
         local fired = false
         for _, c in ipairs(connsOf(b.MouseButton1Click)) do
@@ -426,6 +430,7 @@ local function useAbilitySlot(slot)
         end)
         if ok then return true end
     end
+    if typeof(slot) == "Instance" then return false end -- never fall back to M1 for a named button
     if mouse1click and (not isrbxactive or isrbxactive()) then mouse1click() return true end
     return false
 end
@@ -900,9 +905,17 @@ connect(RunService.Heartbeat, function()
         if best then
             local hum = LP.Character:FindFirstChildOfClass("Humanoid")
             if Cfg.AutoChase and hum and bd > auraRange() * 0.7 then hum:MoveTo(best.Position) end
-            if Cfg.KillAura and bd <= auraRange() then
-                faceTowards(best.Position)
-                tryAttack()
+            -- only swing when the hit can land: check where both of you will be when the swing comes out,
+            -- so a survivor running away doesn't make you whiff and lose your sprint
+            if Cfg.KillAura and bd <= auraRange() + 4 then
+                local lead = 0.3
+                local mv, tv = r.AssemblyLinearVelocity, best.AssemblyLinearVelocity
+                local me = r.Position + Vector3.new(mv.X, 0, mv.Z) * lead
+                local them = best.Position + Vector3.new(tv.X, 0, tv.Z) * lead
+                if (them - me).Magnitude <= auraRange() and bd <= auraRange() + 2 then
+                    faceTowards(best.Position)
+                    tryAttack()
+                end
             end
         end
     end
@@ -1217,6 +1230,292 @@ do
             for m in pairs(lines) do if not seen[m] then drop(m) end end
         end)
     end
+end
+-- Combat: auto block + aimbot ----------------------------------------------------------------------------
+local function abilityBtn(names)
+    local mu = LP.PlayerGui:FindFirstChild("MainUI")
+    local ac = mu and mu:FindFirstChild("AbilityContainer")
+    if not ac then return nil end
+    for _, n in ipairs(names) do
+        local b = ac:FindFirstChild(n)
+        if b and b:IsA("GuiButton") and b.Visible then return b end
+    end
+end
+local function btnReady(b)
+    if not b then return false end
+    local cd = b:FindFirstChild("CooldownTime", true)
+    if not cd or not cd:IsA("TextLabel") then return true end
+    local t = cd.Text
+    return t == "" or (tonumber(t) or 0) <= 0
+end
+local BLOCK_NAMES = { "Block", "Parry", "Counter", "Deflect" }
+-- killer animation id -> animation name, built from every killer and killer skin Config
+local attackAnims = {}
+local ATTACK_WORDS = { "slash", "stab", "attack", "punch", "behead", "bite", "lunge", "dismantle", "uppercut",
+    "combo", "swing", "strike", "gashingwound", "voidrush", "eviscerate", "hatchet", "claw", "smash" }
+local NOT_ATTACK = { "idle", "walk", "run", "execution", "victory", "intro", "stunned", "cutscene", "victim", "emote",
+    "unstable", "loop", "warning" }
+local function isAttackName(n)
+    n = n:lower()
+    for _, w in ipairs(NOT_ATTACK) do if n:find(w, 1, true) then return false end end
+    for _, w in ipairs(ATTACK_WORDS) do if n:find(w, 1, true) then return true end end
+    return false
+end
+task.spawn(function()
+    local assets = RS:WaitForChild("Assets", 30)
+    local roots = {}
+    if assets then
+        table.insert(roots, assets:FindFirstChild("Killers"))
+        local sk = assets:FindFirstChild("Skins")
+        table.insert(roots, sk and sk:FindFirstChild("Killers"))
+    end
+    -- Animations entries can be an id string, an Animation, or a nested table of variants
+    -- (Sixer: Slash = { Slash = id, Bite = id }), so walk them recursively
+    local function addAnims(t, parentName, depth)
+        if depth > 4 then return end
+        for name, v in pairs(t) do
+            local n = tostring(name)
+            if type(v) == "table" then
+                addAnims(v, isAttackName(n) and n or parentName, depth + 1)
+            else
+                local s = type(v) == "string" and v or (typeof(v) == "Instance" and v:IsA("Animation") and v.AnimationId)
+                local num = s and s:match("%d+")
+                if num and num ~= "0" then
+                    if isAttackName(n) then attackAnims[num] = n
+                    elseif parentName and type(name) == "number" then attackAnims[num] = parentName end
+                end
+            end
+        end
+    end
+    for _, root in ipairs(roots) do
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("ModuleScript") and d.Name == "Config" then
+                local cfg = try(require, d)
+                local anims = type(cfg) == "table" and cfg.Animations
+                if type(anims) == "table" then addAnims(anims, nil, 0) end
+            elseif d:IsA("Animation") and isAttackName(d.Name) then
+                local num = d.AnimationId:match("%d+")
+                if num and num ~= "0" then attackAnims[num] = d.Name end
+            end
+        end
+    end
+end)
+genv.__FurinaAttackAnims = attackAnims
+local blockLog = {}
+genv.__FurinaBlockLog = blockLog
+local function logBlock(s)
+    table.insert(blockLog, 1, ("%.1f %s"):format(os.clock(), s))
+    if #blockLog > 30 then table.remove(blockLog) end
+end
+local lastBlockT = 0
+local function tryParry(killer, hpBefore, punchWasReady)
+    if not Cfg.AutoParry then return end
+    local t0 = os.clock()
+    while alive and os.clock() - t0 < 1.1 do
+        task.wait(0.03)
+        local punch = abilityBtn({ "Punch" })
+        local hum = myHum()
+        if not punch or not hum then return end
+        -- a successful block resets Punch's cooldown; if it was already ready, "no damage taken" is the tell
+        local success = (not punchWasReady and btnReady(punch)) or
+            (punchWasReady and os.clock() - t0 > 0.35 and hum.Health >= hpBefore - 0.5)
+        local kr = rootOf(killer); local r = myRoot()
+        if success and kr and r and (kr.Position - r.Position).Magnitude <= 11 then
+            faceTowards(kr.Position)
+            useAbilitySlot(punch)
+            logBlock("parry punch")
+            return
+        end
+    end
+end
+local function onKillerAnim(killer, track)
+    if not Cfg.AutoBlock or myRole() ~= "Survivors" then return end
+    local anim = track.Animation
+    local num = anim and anim.AnimationId:match("%d+")
+    local name = num and attackAnims[num]
+    if not name then return end
+    local kr, r, hum = rootOf(killer), myRoot(), myHum()
+    if not kr or not r or not hum or hum.Health <= 0 then return end
+    local d = (kr.Position - r.Position).Magnitude
+    if d > Cfg.BlockRange then return end
+    if Cfg.BlockFacing and d > 4 then
+        local to = (r.Position - kr.Position) * Vector3.new(1, 0, 1)
+        if to.Magnitude > 0.1 and kr.CFrame.LookVector:Dot(to.Unit) < 0.2 then return end
+    end
+    local btn = abilityBtn(BLOCK_NAMES)
+    if not btn or not btnReady(btn) or os.clock() - lastBlockT < 0.5 then return end
+    lastBlockT = os.clock()
+    local punch = abilityBtn({ "Punch" })
+    local punchWasReady, hpBefore = btnReady(punch), hum.Health
+    task.spawn(function()
+        if Cfg.BlockDelay > 0 then task.wait(Cfg.BlockDelay) end
+        useAbilitySlot(btn)
+        logBlock(("block %s.%s at %.1f studs"):format(killer.Name, name, d))
+        tryParry(killer, hpBefore, punchWasReady)
+    end)
+end
+do
+    local hooked = {}
+    local function hookRig(m)
+        if hooked[m] or m == LP.Character then return end
+        hooked[m] = true
+        task.spawn(function()
+            local h = m:WaitForChild("Humanoid", 10)
+            local an = h and h:WaitForChild("Animator", 10)
+            if not an or not alive or not hooked[m] then return end
+            local c = an.AnimationPlayed:Connect(function(tr) pcall(onKillerAnim, m, tr) end)
+            hooked[m] = c
+        end)
+    end
+    local function unhook(m)
+        local c = hooked[m]
+        if typeof(c) == "RBXScriptConnection" then c:Disconnect() end
+        hooked[m] = nil
+    end
+    onCleanup(function() for m in pairs(hooked) do unhook(m) end end)
+    task.spawn(function()
+        local pf = workspace:WaitForChild("Players", 30)
+        local kf = pf and pf:WaitForChild("Killers", 30)
+        if not kf or not alive then return end
+        for _, m in ipairs(kf:GetChildren()) do hookRig(m) end
+        connect(kf.ChildAdded, hookRig)
+        connect(kf.ChildRemoved, unhook)
+    end)
+end
+
+-- Aimbot: silent aim answers the server's GetMousePosition / GetCameraCFrame requests with the target
+local function enemyFolder()
+    local role = myRole()
+    if role == "Survivors" then return teamFolder("Killers") end
+    if role == "Killers" then return teamFolder("Survivors") end
+end
+local function aimPoint(m)
+    local part = Cfg.AimPart == "Head" and m:FindFirstChild("Head") or rootOf(m)
+    if not part then return end
+    local p = part.Position
+    local rt = rootOf(m)
+    if rt and Cfg.AimPredict > 0 then
+        local v = rt.AssemblyLinearVelocity
+        p = p + Vector3.new(v.X, math.clamp(v.Y, -20, 20) * 0.5, v.Z) * Cfg.AimPredict
+    end
+    return p
+end
+local function screenAim()
+    if IS_MOBILE then
+        local vp = workspace.CurrentCamera.ViewportSize
+        return Vector2.new(vp.X / 2, vp.Y / 2)
+    end
+    return UIS:GetMouseLocation()
+end
+local aimTarget, aimT = nil, 0
+local function findTarget()
+    if os.clock() - aimT < 0.05 and aimTarget and aimTarget.Parent then return aimTarget end
+    aimT = os.clock()
+    local f, r = enemyFolder(), myRoot()
+    local cam = workspace.CurrentCamera
+    if not f or not r or not cam then aimTarget = nil return nil end
+    local best, bestScore
+    local from = screenAim()
+    for _, m in ipairs(f:GetChildren()) do
+        local h = m:FindFirstChildOfClass("Humanoid"); local rt = rootOf(m)
+        if m ~= LP.Character and h and rt and h.Health > 0 then
+            local d = (rt.Position - r.Position).Magnitude
+            if d <= Cfg.AimMaxDist then
+                local score
+                if Cfg.AimMode == "Distance" then
+                    score = d
+                else
+                    local sp, on = cam:WorldToViewportPoint(rt.Position)
+                    local sd = (Vector2.new(sp.X, sp.Y) - from).Magnitude
+                    if on and sd <= Cfg.AimFov then score = sd end
+                end
+                if score and (not bestScore or score < bestScore) then best, bestScore = m, score end
+            end
+        end
+    end
+    aimTarget = best
+    return best
+end
+genv.__FurinaAimTarget = function() return findTarget() end
+do
+    local GPMP = try(function() return require(RS.Systems.Player.Miscellaneous.GetPlayerMousePosition) end)
+    if type(GPMP) == "table" and type(GPMP.GetMousePos) == "function" then
+        local origPos, origCam = GPMP.GetMousePos, GPMP.GetCameraCFrame
+        GPMP.GetMousePos = function(self, ...)
+            if alive and Cfg.SilentAim then
+                local t = findTarget()
+                local p = t and aimPoint(t)
+                if p then return p end
+            end
+            return origPos(self, ...)
+        end
+        if type(origCam) == "function" then
+            GPMP.GetCameraCFrame = function(self, ...)
+                if alive and Cfg.SilentAim then
+                    local t = findTarget()
+                    local p = t and aimPoint(t)
+                    local cam = workspace.CurrentCamera
+                    if p and cam then return CFrame.lookAt(cam.CFrame.Position, p) end
+                end
+                return origCam(self, ...)
+            end
+        end
+        onCleanup(function()
+            GPMP.GetMousePos = origPos
+            if origCam then GPMP.GetCameraCFrame = origCam end
+        end)
+    end
+end
+do
+    local circle
+    if Drawing and Drawing.new then
+        local ok, c = pcall(Drawing.new, "Circle")
+        if ok then
+            circle = c
+            circle.Thickness = 1.5; circle.NumSides = 64; circle.Filled = false
+            circle.Transparency = 0.8; circle.Color = Color3.fromRGB(232, 199, 122)
+            circle.Visible = false
+            onCleanup(function() pcall(function() circle:Remove() end) end)
+        end
+    end
+    local autoRotOff = false
+    local function restoreRotate()
+        if autoRotOff then
+            autoRotOff = false
+            local h = myHum(); if h then h.AutoRotate = true end
+        end
+    end
+    onCleanup(function()
+        pcall(function() RunService:UnbindFromRenderStep("FurinaAim") end)
+        restoreRotate()
+    end)
+    RunService:BindToRenderStep("FurinaAim", Enum.RenderPriority.Camera.Value + 2, function(dt)
+        if not alive then return end
+        local cam = workspace.CurrentCamera
+        local aiming = Cfg.SilentAim or Cfg.CamLock
+        if circle then
+            local show = aiming and Cfg.ShowFov and Cfg.AimMode ~= "Distance" and enemyFolder() ~= nil
+            circle.Visible = show
+            if show then circle.Position = screenAim(); circle.Radius = Cfg.AimFov end
+        end
+        local t = (aiming or Cfg.FaceTarget) and findTarget()
+        local p = t and aimPoint(t)
+        if Cfg.CamLock and p and cam then
+            local want = CFrame.lookAt(cam.CFrame.Position, p)
+            local a = math.clamp(Cfg.AimSmooth, 0.05, 1)
+            cam.CFrame = cam.CFrame:Lerp(want, 1 - (1 - a) ^ (dt * 60))
+        end
+        local r, h = myRoot(), myHum()
+        if Cfg.FaceTarget and p and r and h and (p - r.Position).Magnitude <= Cfg.FaceRange then
+            if not autoRotOff then autoRotOff = true; h.AutoRotate = false end
+            local flat = Vector3.new(p.X, r.Position.Y, p.Z)
+            if (flat - r.Position).Magnitude > 0.5 then
+                r.CFrame = CFrame.lookAt(r.Position, flat)
+            end
+        else
+            restoreRotate()
+        end
+    end)
 end
 do
     local savedZoom = LP.CameraMaxZoomDistance
@@ -1585,12 +1884,38 @@ note(EventTab, "Candies are first come, first served: once anyone picks one up i
 -- Killer ------------------------------------------------------------------------------------------------
 local KillTab = tab("Killer", "combat")
 head(KillTab, "Killer")
-tog(KillTab, "Kill Aura", "KillAura", "Presses your attack ability (through the game's own button) when a survivor is in range")
-sld(KillTab, "Aura Range", "AuraRange", 4, 16, 1, " studs")
+tog(KillTab, "Kill Aura", "KillAura", "Swings your attack only when a survivor will still be in range as the swing lands")sld(KillTab, "Aura Range", "AuraRange", 4, 16, 1, " studs")
 sld(KillTab, "Attack Interval", "AuraDelay", 100, 1500, 50, " ms", 1000)
 tog(KillTab, "Auto Chase Nearest Survivor", "AutoChase")
 sld(KillTab, "Attack Ability Slot", "AttackSlot", 1, 4, 1)
 note(KillTab, "Safe Mode caps the aura at 7.5 studs and 450 ms. Slot 1 is your normal attack (M1).")
+
+-- Combat ------------------------------------------------------------------------------------------------
+local CombatTab = tab("Combat", "hitbox")
+head(CombatTab, "Auto Block")
+tog(CombatTab, "Perfect Auto Block", "AutoBlock", "Blocks the instant a killer starts an attack swing near you (Guest 1337's Block)")
+sld(CombatTab, "Block Range", "BlockRange", 6, 25, 1, " studs")
+tog(CombatTab, "Only When Killer Faces Me", "BlockFacing", "Saves your Block cooldown for attacks that can actually hit you")
+sld(CombatTab, "Block Delay", "BlockDelay", 0, 300, 10, " ms", 1000)
+tog(CombatTab, "Auto Parry Punch", "AutoParry", "Throws Punch right after a successful block, which turns it into a Parry")
+note(CombatTab, "Block lasts 1s and has a long cooldown, so keep the delay at 0 unless you lag. Blocking a non-basic attack breaks the block but still cuts the damage.")
+head(CombatTab, "Aimbot")
+tog(CombatTab, "Silent Aim", "SilentAim", "Aimed abilities (guns, projectiles, Corrupt Energy, etc.) go to the target without moving your camera")
+tog(CombatTab, "Camera Lock", "CamLock", "Turns your camera onto the target")
+bind(CombatTab, "Camera Lock Key", "AimKey", "Turns Camera Lock on and off")
+tog(CombatTab, "Face Target (melee)", "FaceTarget", "Turns your character toward the target when close, so swings and punches land")
+sld(CombatTab, "Face Range", "FaceRange", 5, 40, 1, " studs")
+CombatTab:CreateDropdown({ Name = "Target By", Description = "Crosshair: closest to your mouse (center of screen on mobile) inside the FOV circle. Distance: closest to you",
+    Options = { "Crosshair", "Distance" }, CurrentOption = { Cfg.AimMode }, MultipleOptions = false,
+    Callback = function(o) Cfg.AimMode = type(o) == "table" and o[1] or o end })
+CombatTab:CreateDropdown({ Name = "Aim Part", Options = { "Torso", "Head" }, CurrentOption = { Cfg.AimPart }, MultipleOptions = false,
+    Callback = function(o) Cfg.AimPart = type(o) == "table" and o[1] or o end })
+sld(CombatTab, "FOV Radius", "AimFov", 40, 600, 10, " px")
+tog(CombatTab, "Show FOV Circle" .. (Drawing and "" or " (PC only)"), "ShowFov")
+sld(CombatTab, "Smoothness", "AimSmooth", 5, 100, 5, "%", 100)
+sld(CombatTab, "Prediction", "AimPredict", 0, 400, 10, " ms", 1000)
+sld(CombatTab, "Max Distance", "AimMaxDist", 20, 400, 10, " studs")
+note(CombatTab, "Targets killers when you are a survivor and survivors when you are the killer. Smoothness 100% snaps instantly.")
 
 -- ESP ---------------------------------------------------------------------------------------------------
 local EspTab = tab("ESP", "esp")
@@ -1703,6 +2028,11 @@ connect(UIS.InputBegan, function(input, gpe)
     if gpe or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
     local name = input.KeyCode.Name
     if name == Cfg.PanicKey then unload() end
+    if name == Cfg.AimKey then
+        Cfg.CamLock = not Cfg.CamLock
+        if Toggles.CamLock then pcall(function() Toggles.CamLock:Set(Cfg.CamLock) end) end
+        notify("Camera Lock", Cfg.CamLock and "On" or "Off", 2)
+    end
 end)
 
 -- floating buttons (mobile) -------------------------------------------------------------------------
