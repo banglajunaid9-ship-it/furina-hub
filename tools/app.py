@@ -102,7 +102,7 @@ PAGE = r"""<!doctype html>
     <div class="row">
       <div class="opt">
         <label>Layers (more = stronger &amp; larger)</label>
-        <input id="layers" type="number" min="1" max="6" value="2">
+        <input id="layers" type="number" min="1" max="6" value="3">
       </div>
       <div class="opt">
         <label>Header comment (optional)</label>
@@ -230,7 +230,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("empty script")
             result = obf_engine.obfuscate(
                 source,
-                layers=max(1, min(int(payload.get("layers", 2)), 6)),
+                layers=max(1, min(int(payload.get("layers", 3)), 6)),
                 anti_tamper=bool(payload.get("antiTamper", True)),
                 anti_hook=bool(payload.get("antiHook", False)),
                 header=(payload.get("name") or None),

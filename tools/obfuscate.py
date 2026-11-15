@@ -30,7 +30,7 @@ def main() -> int:
     )
     ap.add_argument("input", help="path to the .luau / .lua script to protect")
     ap.add_argument("-o", "--output", help="output path (default: <input>.obf.lua)")
-    ap.add_argument("--layers", type=int, default=2, help="loader layers to stack (default 2)")
+    ap.add_argument("--layers", type=int, default=3, help="loader layers to stack (default 3)")
     ap.add_argument("--name", help="one-line header comment to keep on top")
     ap.add_argument("--seed", type=int, help="random seed, for reproducible output")
     ap.add_argument(

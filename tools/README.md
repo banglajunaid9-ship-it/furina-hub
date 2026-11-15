@@ -22,8 +22,8 @@ python tools/obfuscate.py input.luau --layers 3 --anti-hook --name "Furina Hub"
 
 | flag | meaning |
 |---|---|
-| `--layers N` | stack N loader layers (default 2). More = stronger & larger. |
-| `--anti-hook` | add a conservative `loadstring` check. Safe on every executor. |
+| `--layers N` | stack N loader layers (default 3). More = stronger & larger. |
+| `--anti-hook` | refuse to run if `loadstring` was detoured (anti-dump). Degrades safely on executors without `iscclosure`. |
 | `--no-anti-tamper` | turn off the integrity check (not recommended). |
 | `--name "..."` | keep a one-line header comment on top. |
 | `--seed N` | reproducible output. |
@@ -31,16 +31,26 @@ python tools/obfuscate.py input.luau --layers 3 --anti-hook --name "Furina Hub"
 ## How it protects
 
 1. **Comments stripped** — no explanations survive even a full decode.
-2. **Keystream encryption** — bytes are XORed with a Park-Miller LCG keystream.
-   The key is *regenerated at runtime from a seed*, so there's **no key table** in
-   the file to read.
-3. **Scrambled fragments** — the payload is split into many out-of-order pieces
+2. **Chained keystream cipher** — every byte is XORed with a Park-Miller LCG
+   keystream byte, a position mix, **and the previous ciphertext byte**. You can't
+   decode byte *i* without first decoding *i-1*, so a reader can't pull a byte out
+   of the middle and "just un-xor the blob" produces garbage — decoding is forced
+   to run start to finish, in order. The key is *regenerated at runtime from a
+   seed*, so there's **no key table** in the file to read.
+3. **Opaque control flow** — the decode steps don't run top to bottom; they run
+   inside a numeric state machine whose branches are emitted in shuffled order with
+   random state ids, hiding the structure a human or AI would latch onto.
+4. **Scrambled fragments** — the payload is split into many out-of-order pieces
    reassembled by an index table, so there's no single "grab this string" target.
-4. **Anti-tamper** — the loader checksums the decoded bytes and refuses to run if
+5. **Anti-tamper** — the loader checksums the decoded bytes and refuses to run if
    the payload was edited (verified: flipping one character disables it).
-5. **Anti-hook (optional)** — removes the easiest `loadstring` dump path without
-   executor-specific checks that could false-positive.
-6. **Multi-layer** — each layer wraps the last with fresh random names and params.
+6. **Anti-dump (optional, `--anti-hook`)** — refuses to run if `loadstring` has
+   been detoured into a Lua closure (`iscclosure` check), the classic "hook
+   loadstring and print the source" path. On an executor without `iscclosure` it
+   skips the check, so it never false-positives. *Verified live on the Real
+   executor: genuine loadstring passes, a Lua-closure hook is rejected.*
+7. **Multi-layer** — each layer wraps the last with fresh random names, seed, IV,
+   and state ids (default 3).
 
 ## What it does and does not do — read this
 
@@ -59,10 +69,19 @@ it. That beats the whole off-the-shelf "deobfuscator" collection, casual reading
 and copy-paste theft.
 
 **It is not unbreakable, and nothing is.** The script has to run, so at some
-instant the real code exists in memory. A determined, skilled attacker who hooks
-`loadstring`/`load` inside an executor can still dump a working copy. Anyone who
-promises an obfuscator "no AI or person can ever bypass" is lying. This is strong
-protection — not a vault.
+instant the real code exists in memory. A determined, skilled attacker who defeats
+the anti-dump and hooks `loadstring`/`load` inside an executor can still dump a
+working copy. Anyone who promises an obfuscator "no AI or person can ever bypass"
+is lying. This is strong protection — not a vault. The only way to actually stop a
+`loadstring`-hook dump is a custom bytecode VM that never reconstructs the source
+as text; that's a separate, larger build.
+
+**Executor compatibility.** The loader uses only universal Lua plus standard
+executor globals (`loadstring`/`load`, `getfenv`, `bit32` with a pure-arithmetic
+fallback, optional `iscclosure`). Verified live in-game on the **Real** executor;
+runs the same on **Delta** and other mainstream executors (Swift, Wave, Fluxus),
+which expose the same globals. The `--anti-hook` check degrades to a no-op on any
+executor that lacks `iscclosure`, so it never breaks a legit run.
 
 ## Files
 
