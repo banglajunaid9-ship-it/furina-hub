@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vrya UI Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0E0E10; --surface:#3A3A3F; --accent:#E9E9EE; --text:#F5F5F7; --border:#D4D6DC;
+  --glass:.80; --blur:18px; --refl:.65;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:radial-gradient(1200px 800px at 50% 40%, color-mix(in srgb,var(--bg) 70%, #2a2a2e) 0%, var(--bg) 70%);
+  color:var(--text); font-family:Poppins,system-ui,sans-serif; overflow:hidden;
+  transition:background .4s;
+}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+input,textarea{font:inherit;color:inherit}
+
+/* stage + chrome backdrop */
+.stage{position:fixed;left:50%;top:50%;width:min(940px,calc(100vw - 32px));height:min(590px,calc(100vh - 32px));
+  transform:translate(-50%,-50%) scale(1);transition:transform .55s cubic-bezier(.34,1.4,.64,1),top .5s,left .5s,opacity .3s}
+.stage.collapsed{transform:translate(-50%,-50%) scale(.04);top:28px!important;left:50%!important;opacity:0;pointer-events:none;
+  transition:transform .42s cubic-bezier(.7,0,.84,0),top .42s cubic-bezier(.7,0,.84,0),opacity .4s .1s}
+.orb{position:absolute;border-radius:50%;
+  background:linear-gradient(125deg,#fcfcfe 0%,#a8abb2 25%,#28292e 50%,#80838c 75%,#eeeff3 100%);
+  box-shadow:inset -10px -14px 30px rgba(0,0,0,.6), inset 8px 10px 20px rgba(255,255,255,.4);
+  animation:drift 7s ease-in-out infinite alternate}
+.orb::after{content:"";position:absolute;left:18%;top:14%;width:42%;height:26%;border-radius:50%;
+  background:linear-gradient(#fff,transparent);transform:rotate(-32deg);opacity:.85}
+.ring{position:absolute;border-radius:50%;border:solid transparent;
+  background:linear-gradient(60deg,#fcfcfe,#a8abb2,#28292e,#80838c,#eeeff3) border-box;
+  -webkit-mask:linear-gradient(#000 0 0) padding-box exclude,linear-gradient(#000 0 0);mask:linear-gradient(#000 0 0) padding-box exclude,linear-gradient(#000 0 0);
+  animation:drift 9s ease-in-out infinite alternate-reverse}
+@keyframes drift{to{translate:10px 14px}}
+.noorbs .orb,.noorbs .ring{display:none}
+
+/* window glass */
+.win{position:absolute;inset:0;border-radius:26px;overflow:hidden;
+  background:color-mix(in srgb, color-mix(in srgb,var(--surface) 45%, var(--bg)) calc(var(--glass)*100%), transparent);
+  backdrop-filter:blur(var(--blur)) saturate(1.3);-webkit-backdrop-filter:blur(var(--blur)) saturate(1.3);
+  border:1px solid color-mix(in srgb,var(--border) 45%,transparent);
+  box-shadow:0 40px 120px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.12);
+  display:flex;flex-direction:column}
+.win::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;
+  background:linear-gradient(152deg, rgba(255,255,255,calc(.13*var(--refl))) 0%, rgba(255,255,255,calc(.025*var(--refl))) 35%, transparent 60%, rgba(255,255,255,calc(.05*var(--refl))) 100%)}
+.glow{position:absolute;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle, color-mix(in srgb,#fff 70%,var(--accent)) 0%, transparent 65%);
+  opacity:calc(.32*var(--refl));filter:blur(18px);animation:drift 11s ease-in-out infinite alternate}
+
+/* topbar */
+.top{height:52px;display:flex;align-items:center;padding:0 20px;position:relative;cursor:grab;flex:none;
+  border-bottom:1px solid color-mix(in srgb,var(--border) 18%,transparent);user-select:none}
+.lights{display:flex;gap:8px;z-index:2}
+.lights button{width:14px;height:14px;border-radius:50%;font-size:10px;font-weight:700;color:rgba(60,20,15,.0);line-height:14px;
+  box-shadow:inset 0 -2px 3px rgba(0,0,0,.25), inset 0 2px 3px rgba(255,255,255,.5);transition:transform .15s}
+.lights:hover button{color:rgba(60,20,15,.8)}
+.lights button:active{transform:scale(.88)}
+.l-red{background:#ff5f57}.l-yel{background:#febc2e}.l-grn{background:#28c840}
+.addr{position:absolute;left:50%;transform:translateX(-50%);font-size:13px;opacity:.6}
+.clock{margin-left:auto;font:12px "JetBrains Mono";opacity:.6}
+
+/* body */
+.body{flex:1;display:flex;min-height:0;position:relative}
+.side{width:196px;flex:none;padding:14px 12px;display:flex;flex-direction:column;border-right:1px solid color-mix(in srgb,var(--border) 15%,transparent)}
+.brand{font-size:26px;font-weight:700;padding:0 10px;line-height:1.2}
+.brand small{display:block;font-size:11px;font-weight:400;opacity:.45;margin-top:-2px}
+.nav{position:relative;margin-top:18px}
+.ind{position:absolute;left:0;right:0;height:38px;border-radius:12px;
+  background:color-mix(in srgb,var(--accent) 18%,transparent);border:1px solid color-mix(in srgb,var(--border) 40%,transparent);
+  transition:top .45s cubic-bezier(.34,1.5,.64,1)}
+.nav button{position:relative;display:flex;align-items:center;gap:12px;width:100%;height:38px;margin-bottom:4px;padding:0 12px;
+  font-size:14px;font-weight:500;opacity:.65;transition:opacity .2s,transform .15s}
+.nav button.on,.nav button:hover{opacity:1}
+.nav button:active{transform:scale(.96)}
+.nav .ic{width:26px;text-align:center;font-weight:700}
+.profile{margin-top:auto;display:flex;align-items:center;gap:10px;padding:8px}
+.av{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--surface));border:1px solid var(--border);display:grid;place-items:center;font-size:13px;font-weight:600;color:var(--bg)}
+.profile b{display:block;font-size:13px;font-weight:500}.profile span{font-size:11px;opacity:.45}
+
+.content{flex:1;min-width:0;position:relative}
+.page{position:absolute;inset:0;overflow-y:auto;padding:20px 22px 24px;display:none;flex-direction:column;gap:14px;scrollbar-width:thin}
+.page.on{display:flex;animation:pin .5s cubic-bezier(.22,1,.36,1)}
+@keyframes pin{from{transform:translateY(16px);opacity:0}}
+h1{font-size:26px;font-weight:700;line-height:1.1}
+.sub{font-size:13px;opacity:.58}
+.sec{font-size:11px;font-weight:600;letter-spacing:.06em;opacity:.55;text-transform:uppercase;margin-top:6px}
+
+.glass{position:relative;border-radius:16px;
+  background:color-mix(in srgb,var(--surface) calc(var(--glass)*40%),transparent);
+  border:1px solid color-mix(in srgb,var(--border) 30%,transparent);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,calc(.12*var(--refl)))}
+.glass::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(150deg,rgba(255,255,255,calc(.1*var(--refl))),transparent 45%)}
+.btn{height:34px;padding:0 16px;border-radius:99px;font-size:13px;font-weight:500;
+  background:color-mix(in srgb,var(--text) 8%,transparent);border:1px solid color-mix(in srgb,var(--border) 35%,transparent);transition:transform .15s,background .2s}
+.btn:hover{background:color-mix(in srgb,var(--text) 15%,transparent)}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:var(--accent);color:var(--onacc,#121214);border-color:transparent}
+.btn.dan{background:rgba(255,69,58,.22);color:#ff8c82}
+.btn.sm{height:30px;padding:0 14px}
+
+/* home */
+.hero{min-height:210px;padding:22px 26px;border-radius:22px;display:flex;flex-direction:column}
+.hero .big{font-size:42px;font-weight:700;line-height:1.02;margin-top:6px}
+.hero .big span{opacity:.4}
+.badges{display:flex;gap:8px;margin-top:auto}
+.badges i{font:600 11px "JetBrains Mono";font-style:normal;border:1.3px solid color-mix(in srgb,var(--text) 70%,transparent);border-radius:5px;padding:3px 8px}
+.hero p{font-size:13px;opacity:.65;margin-top:8px}
+.hero .acts{position:absolute;right:24px;top:22px;display:flex;gap:8px}
+.grid{display:grid;gap:12px}
+.tiles{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.tile{padding:14px 16px;height:86px;display:flex;flex-direction:column;justify-content:space-between;border-radius:18px}
+.tile small{font-size:12px;opacity:.58}.tile b{font-size:26px;font-weight:700}
+.qa{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+.qa button{text-align:left;padding:14px 16px;border-radius:18px;transition:transform .15s}
+.qa button:active{transform:scale(.96)}
+.qa b{display:block;font-size:14px;font-weight:600}.qa span{font-size:11px;opacity:.55}
+
+/* library */
+.search{height:42px;border-radius:21px;padding:0 16px 0 40px;width:100%;outline:none;
+  background:color-mix(in srgb,var(--bg) calc(var(--glass)*45%),transparent);border:1px solid color-mix(in srgb,var(--border) 30%,transparent)}
+.search:focus{border-color:var(--border)}
+.sw{position:relative}.sw::before{content:"⌕";position:absolute;left:15px;top:9px;font-size:18px;opacity:.4}
+.chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;flex:none}
+.chip{height:30px;padding:0 14px;border-radius:99px;font-size:12px;font-weight:500;white-space:nowrap;
+  background:color-mix(in srgb,var(--text) 7%,transparent);border:1px solid color-mix(in srgb,var(--border) 30%,transparent);transition:.25s}
+.chip.on{background:var(--accent);color:var(--onacc,#121214)}
+.cards{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.card{height:156px;padding:14px 14px 14px 16px;border-radius:18px;display:flex;flex-direction:column;transition:border-color .2s}
+.card:hover{border-color:color-mix(in srgb,var(--border) 75%,transparent)}
+.tag{align-self:flex-start;font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;background:color-mix(in srgb,var(--accent) 18%,transparent)}
+.star{position:absolute;right:12px;top:10px;width:28px;height:28px;border-radius:50%;background:color-mix(in srgb,var(--text) 7%,transparent);color:var(--accent);transition:transform .3s cubic-bezier(.34,1.8,.64,1)}
+.star.pop{transform:scale(1.35)}
+.card h3{font-size:16px;font-weight:600;margin-top:8px}
+.card p{font-size:12px;opacity:.58;margin-top:2px;line-height:1.35}
+.card .f{margin-top:auto;display:flex;align-items:center;justify-content:space-between}
+.card .f small{font:11px "JetBrains Mono";opacity:.4}
+.empty{text-align:center;font-size:13px;opacity:.4;padding:20px}
+
+/* editor */
+.ebar{display:flex;gap:6px}
+.ebar input{flex:1;height:38px;border-radius:19px;padding:0 14px;outline:none;font:13px "JetBrains Mono";
+  background:color-mix(in srgb,var(--bg) calc(var(--glass)*45%),transparent);border:1px solid color-mix(in srgb,var(--border) 30%,transparent)}
+.code{flex:1;min-height:260px;border-radius:18px;display:flex;overflow:hidden;
+  background:color-mix(in srgb,var(--bg) calc(var(--glass)*50%),transparent)}
+.gut{width:46px;padding:12px 8px 12px 0;text-align:right;font:13px/1.55 "JetBrains Mono";opacity:.35;border-right:1px solid color-mix(in srgb,var(--border) 15%,transparent);white-space:pre;overflow:hidden}
+.ed{position:relative;flex:1;overflow:auto}
+.ed pre,.ed textarea{position:absolute;inset:0;padding:12px;font:13px/1.55 "JetBrains Mono";white-space:pre;tab-size:4;min-width:100%;min-height:100%}
+.ed textarea{background:transparent;color:transparent;caret-color:var(--text);border:0;outline:none;resize:none;overflow:hidden}
+.ed pre{pointer-events:none}
+.status{font:12px "JetBrains Mono";opacity:.4}
+
+/* themes */
+.prev{display:flex;gap:16px;padding:14px;border-radius:20px}
+.mini{flex:1.2;border-radius:14px;padding:12px;position:relative;
+  background:color-mix(in srgb, color-mix(in srgb,var(--surface) 45%,var(--bg)) calc(var(--glass)*100%),transparent);border:1px solid color-mix(in srgb,var(--border) 45%,transparent)}
+.mini .d{display:flex;gap:5px}.mini .d i{width:8px;height:8px;border-radius:50%}
+.mini b{display:block;font-size:16px;margin-top:8px}.mini p{font-size:11px;opacity:.58}
+.pbar{height:4px;border-radius:9px;background:color-mix(in srgb,var(--text) 15%,transparent);margin:10px 0}
+.pbar i{display:block;height:100%;width:62%;border-radius:9px;background:var(--accent)}
+.mini .row{display:flex;justify-content:space-between;align-items:center}
+.tog{width:36px;height:22px;border-radius:99px;background:var(--accent);position:relative}.tog::after{content:"";position:absolute;right:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff}
+.sws{flex:1;display:flex;flex-direction:column;gap:4px;font-size:11px}
+.sws b{font-size:13px;margin-bottom:2px}
+.sws div{display:flex;align-items:center;gap:8px}.sws div i{width:14px;height:14px;border-radius:4px;border:1px solid rgba(255,255,255,.3)}
+.sws div span{opacity:.58;flex:1}.sws div code{font-family:"JetBrains Mono"}
+.presets{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.pc{height:112px;border-radius:16px;padding:10px;text-align:left;display:flex;flex-direction:column;transition:transform .15s, box-shadow .25s}
+.pc:active{transform:scale(.96)}
+.pc .w{height:54px;border-radius:10px;position:relative;padding:12px 10px}
+.pc .w i{display:block;height:6px;width:50%;border-radius:9px}.pc .w i+i{height:5px;width:32%;margin-top:6px;opacity:.45}
+.pc .w em{position:absolute;right:10px;bottom:8px;width:26px;height:12px;border-radius:9px}
+.pc span{margin-top:auto;font-size:13px;font-weight:600;padding-left:2px}
+.picker{padding:16px;border-radius:18px;display:flex;gap:16px;flex-wrap:wrap}
+.sv{width:168px;height:168px;border-radius:12px;position:relative;cursor:crosshair;touch-action:none;
+  background:linear-gradient(to top,#000,transparent),linear-gradient(to right,#fff,transparent)}
+.sv i,.hue i{position:absolute;pointer-events:none}
+.sv i{width:16px;height:16px;border:2.5px solid #fff;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 4px rgba(0,0,0,.5)}
+.hue{width:16px;height:168px;border-radius:9px;position:relative;cursor:ns-resize;touch-action:none;
+  background:linear-gradient(red,#ff0,lime,cyan,blue,#f0f,red)}
+.hue i{left:50%;width:22px;height:8px;border-radius:9px;background:#fff;transform:translate(-50%,-50%);box-shadow:0 0 3px rgba(0,0,0,.6)}
+.pinfo{flex:1;min-width:160px;display:flex;flex-direction:column;gap:10px}
+.pinfo .swatch{height:46px;border-radius:12px;border:1px solid color-mix(in srgb,var(--border) 50%,transparent)}
+.field{height:34px;border-radius:12px;padding:0 12px;outline:none;font:13px "JetBrains Mono";width:100%;
+  background:color-mix(in srgb,var(--bg) calc(var(--glass)*45%),transparent);border:1px solid color-mix(in srgb,var(--border) 30%,transparent)}
+.rgb{display:flex;gap:6px}
+.hint{font-size:10px;opacity:.4}
+.slider{padding:10px 16px 14px;border-radius:14px}
+.slider .h{display:flex;justify-content:space-between;font-size:14px;font-weight:500}
+.slider .h code{font:13px "JetBrains Mono";opacity:.58}
+.slider input{width:100%;margin-top:10px;accent-color:var(--accent)}
+.rowc{display:flex;align-items:center;gap:12px;padding:10px 14px 10px 16px;border-radius:14px;min-height:50px}
+.rowc .t{flex:1;min-width:0}.rowc .t b{display:block;font-size:14px;font-weight:500}.rowc .t span{font-size:12px;opacity:.58}
+.dots{display:flex}.dots i{width:14px;height:14px;border-radius:50%;margin-left:-4px;border:1.5px solid rgba(0,0,0,.5)}
+textarea.io{height:96px;border-radius:12px;padding:10px 12px;outline:none;resize:none;font:11px "JetBrains Mono";
+  background:color-mix(in srgb,var(--bg) calc(var(--glass)*45%),transparent);border:1px solid color-mix(in srgb,var(--border) 30%,transparent)}
+.flex{display:flex;gap:8px;flex-wrap:wrap}
+
+/* switch */
+.sw2{width:46px;height:28px;border-radius:99px;background:color-mix(in srgb,var(--text) 14%,transparent);position:relative;flex:none;transition:background .3s}
+.sw2::after{content:"";position:absolute;left:3px;top:3px;width:22px;height:22px;border-radius:50%;background:linear-gradient(#fff,#d6d8de);transition:left .4s cubic-bezier(.34,1.6,.64,1)}
+.sw2.on{background:var(--accent)}.sw2.on::after{left:21px}
+.key{font:600 13px "JetBrains Mono"}
+
+/* island + toasts */
+.island{position:fixed;left:50%;top:10px;transform:translateX(-50%);height:38px;width:38px;border-radius:99px;background:#000;
+  border:1px solid #50525a;display:flex;align-items:center;gap:10px;padding:0 15px;overflow:hidden;opacity:0;pointer-events:none;
+  transition:width .55s cubic-bezier(.34,1.5,.64,1),height .5s,opacity .2s;color:#fff;z-index:30}
+.island.on{width:196px;height:40px;opacity:1;pointer-events:auto;cursor:pointer}
+.island .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none;position:relative}
+.island .dot::after{content:"";position:absolute;inset:-2px;border-radius:50%;border:2px solid var(--accent);animation:pulse 1.4s infinite}
+@keyframes pulse{to{inset:-8px;opacity:0}}
+.island b{font-size:14px;font-weight:600;flex:1;white-space:nowrap}
+.island code{font:12px "JetBrains Mono";color:#aaacb4}
+.toasts{position:fixed;right:14px;top:10px;width:300px;display:flex;flex-direction:column;gap:10px;z-index:40}
+.toast{border-radius:18px;padding:11px 14px 14px 32px;cursor:pointer;position:relative;overflow:hidden;
+  background:color-mix(in srgb,var(--surface) 85%,transparent);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+  animation:tin .55s cubic-bezier(.34,1.5,.64,1)}
+.toast.out{animation:tout .35s cubic-bezier(.7,0,.84,0) forwards}
+@keyframes tin{from{transform:translateX(340px)}}@keyframes tout{to{transform:translateX(340px)}}
+.toast::after{content:"";position:absolute;left:16px;top:16px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.toast b{font-size:13px;font-weight:600}.toast p{font-size:12px;opacity:.65;margin-top:2px}
+.toast small{position:absolute;right:14px;top:11px;font-size:11px;opacity:.4}
+.toast .bar{position:absolute;left:18px;right:18px;bottom:6px;height:2px;border-radius:9px;background:var(--accent);opacity:.6;transform-origin:left;animation:shrink linear forwards}
+@keyframes shrink{to{transform:scaleX(0)}}
+
+.hint-key{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;opacity:.4}
+.reduce *{animation-duration:0s!important;transition-duration:0s!important}
+
+/* compact / mobile */
+.compact .side{width:64px;padding:14px 8px}
+.compact .brand{text-align:center;padding:0}.compact .brand small,.compact .nav .lbl,.compact .profile div{display:none}
+.compact .nav button{justify-content:center;padding:0}
+.compact .profile{justify-content:center;padding:8px 0}
+.compact .hero .acts{position:static;margin-top:12px}
+.compact .addr{display:none}
+@media (max-width:720px){.stage{width:calc(100vw - 16px);height:calc(100vh - 16px)}.toasts{left:50%;right:auto;transform:translateX(-50%);top:56px;width:min(300px,calc(100vw - 32px))}}
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <div class="orb" style="width:96px;height:96px;left:70%;top:-60px"></div>
+  <div class="orb" style="width:130px;height:130px;right:-65px;top:34%;animation-duration:6s"></div>
+  <div class="orb" style="width:62px;height:62px;right:-30px;top:63%;animation-duration:5s"></div>
+  <div class="ring" style="width:300px;height:300px;left:52%;bottom:-170px;border-width:36px"></div>
+  <div class="ring" style="width:190px;height:190px;left:-125px;top:52%;border-width:22px"></div>
+
+  <div class="win" id="win">
+    <div class="glow" style="width:260px;height:260px;left:58%;top:-130px"></div>
+    <div class="glow" style="width:300px;height:300px;right:-150px;top:25%"></div>
+    <div class="glow" style="width:460px;height:460px;left:40%;bottom:-260px"></div>
+    <div class="glow" style="width:260px;height:260px;left:-130px;top:58%"></div>
+
+    <div class="top" id="top">
+      <div class="lights">
+        <button class="l-red" id="bClose" title="Hide">×</button>
+        <button class="l-yel" id="bMin" title="Minimize to island">–</button>
+        <button class="l-grn" id="bZoom" title="Zoom">+</button>
+      </div>
+      <div class="addr" id="addr">vrya.app/home</div>
+      <div class="clock" id="clock"></div>
+    </div>
+
+    <div class="body">
+      <aside class="side">
+        <div class="brand" id="brand">Vrya<small>liquid glass</small></div>
+        <nav class="nav" id="nav"><div class="ind" id="ind"></div></nav>
+        <div class="profile"><div class="av">V</div><div><b>Player</b><span>@vrya_user</span></div></div>
+      </aside>
+
+      <main class="content">
+        <!-- HOME -->
+        <section class="page" id="p-home">
+          <div class="glass hero">
+            <div class="sub" id="greet"></div>
+            <div class="big"><span>Liquid</span><br>Glass.</div>
+            <div class="badges" style="margin-top:22px"><i>LUAU</i><i>v1.0.0</i><i>UI ONLY</i></div>
+            <p><b>Modular</b> components &amp; editable themes</p>
+            <div class="acts"><button class="btn" data-go="themes">Theme Studio</button><button class="btn pri" data-go="library">Browse</button></div>
+          </div>
+          <div class="sec">Overview</div>
+          <div class="grid tiles">
+            <div class="glass tile"><small>Library</small><b id="sLib">10</b></div>
+            <div class="glass tile"><small>Favorites</small><b id="sFav">0</b></div>
+            <div class="glass tile"><small>Themes</small><b id="sTh">6</b></div>
+            <div class="glass tile"><small>Session</small><b id="sSes">0:00</b></div>
+            <div class="glass tile"><small>Frame rate</small><b id="sFps">60</b></div>
+          </div>
+          <div class="sec">Quick actions</div>
+          <div class="grid qa">
+            <button class="glass" id="qNew"><b>New snippet</b><span>Open a blank editor</span></button>
+            <button class="glass" data-go="favorites"><b>Favorites</b><span>Your starred scripts</span></button>
+            <button class="glass" id="qRand"><b>Random preset</b><span>Shuffle the look</span></button>
+            <button class="glass" id="qToast"><b>Test toast</b><span>Fire a notification</span></button>
+          </div>
+          <div class="sec">Recent</div>
+          <div id="recent" class="flex" style="flex-direction:column"></div>
+        </section>
+
+        <!-- LIBRARY -->
+        <section class="page" id="p-library">
+          <div><h1 id="libTitle">Library</h1><div class="sub">Curated Luau snippets. Open any card in the editor to read it.</div></div>
+          <div class="sw"><input class="search" id="q" placeholder="Search scripts, categories…"></div>
+          <div class="chips" id="chips"></div>
+          <div class="grid cards" id="cards"></div>
+          <div class="empty" id="empty"></div>
+        </section>
+
+        <!-- EDITOR -->
+        <section class="page" id="p-editor">
+          <div><h1>Editor</h1><div class="sub">Read and write Luau with live highlighting. Code is never executed.</div></div>
+          <div class="ebar"><input id="fname" value="untitled.luau"><button class="btn" id="eNew">New</button><button class="btn" id="eCopy">Select all</button><button class="btn pri" id="eSave">Save</button></div>
+          <div class="glass code"><div class="gut" id="gut">1</div><div class="ed" id="ed"><pre id="hl"></pre><textarea id="src" spellcheck="false"></textarea></div></div>
+          <div class="status" id="status"></div>
+        </section>
+
+        <!-- THEMES -->
+        <section class="page" id="p-themes">
+          <div><h1>Themes</h1><div class="sub">Presets, custom palettes and glass physics. Every change previews live.</div></div>
+          <div class="sec">Live preview</div>
+          <div class="glass prev">
+            <div class="mini"><div class="d"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+              <b>Preview</b><p>Glass, text and accents update as you drag.</p><div class="pbar"><i></i></div>
+              <div class="row"><button class="btn pri sm">Action</button><div class="tog"></div></div></div>
+            <div class="sws" id="sws"></div>
+          </div>
+          <div class="sec">Presets</div>
+          <div class="grid presets" id="presets"></div>
+          <div class="sec">Customize</div>
+          <div class="chips" id="targets"></div>
+          <div class="glass picker">
+            <div class="sv" id="sv"><i id="svc"></i></div>
+            <div class="hue" id="hue"><i id="huec"></i></div>
+            <div class="pinfo">
+              <div class="sub" id="editing">Editing Accent</div>
+              <div class="swatch" id="swatch"></div>
+              <input class="field" id="hex">
+              <div class="rgb"><input class="field" id="r"><input class="field" id="g"><input class="field" id="b"></div>
+              <div class="hint">HEX or RGB · press Enter to apply</div>
+            </div>
+          </div>
+          <div class="glass slider"><div class="h">Glass opacity<code id="vGlass"></code></div><input type="range" min="20" max="100" id="rGlass"></div>
+          <div class="glass slider"><div class="h">Background blur<code id="vBlur"></code></div><input type="range" min="0" max="56" id="rBlur"></div>
+          <div class="glass slider"><div class="h">Reflections<code id="vRefl"></code></div><input type="range" min="0" max="100" id="rRefl"></div>
+          <div class="sec">Your themes</div>
+          <div class="ebar"><input id="tname" placeholder="Theme name" style="font-family:Poppins"><button class="btn pri" id="tSave">Save</button></div>
+          <div id="custom" class="flex" style="flex-direction:column"></div>
+          <div class="sec">Import / Export</div>
+          <textarea class="io" id="io" placeholder='Paste a theme JSON here, e.g. {"Name":"Mine","Accent":"#6E95FF"}'></textarea>
+          <div class="flex"><button class="btn" id="tExp">Export current</button><button class="btn pri" id="tImp">Import</button><button class="btn" id="tClr">Clear</button></div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section class="page" id="p-settings">
+          <div><h1>Settings</h1><div class="sub">Window behaviour, motion and stored data.</div></div>
+          <div class="sec">Window</div>
+          <div class="glass rowc"><div class="t"><b>Toggle keybind</b><span>Shows or hides Vrya on PC</span></div><button class="btn key" id="kb">RightShift</button></div>
+          <div class="glass rowc"><div class="t"><b>Dynamic Island when hidden</b><span>Keep the floating pill visible after using the keybind</span></div><button class="sw2" data-set="island"></button></div>
+          <div class="glass slider"><div class="h">Interface scale<code id="vScale">100%</code></div><input type="range" min="75" max="125" step="5" value="100" id="rScale"></div>
+          <div class="glass rowc"><div class="t"><b>Window position</b><span>Saved automatically when you drag the top bar</span></div><button class="btn" id="recenter">Recenter</button></div>
+          <div class="sec">Appearance</div>
+          <div class="glass rowc"><div class="t"><b>Floating chrome orbs</b><span>Metal spheres and rings behind the glass</span></div><button class="sw2 on" data-set="orbs"></button></div>
+          <div class="glass rowc"><div class="t"><b>Reduce motion</b><span>Skips transitions and spring animations</span></div><button class="sw2" data-set="reduce"></button></div>
+          <div class="glass rowc"><div class="t"><b>Notifications</b><span>Toasts in the top-right corner</span></div><button class="sw2 on" data-set="notify"></button></div>
+          <div class="sec">Data</div>
+          <div class="flex"><button class="btn" id="clrFav">Clear favorites</button><button class="btn dan" id="reset">Reset everything</button></div>
+        </section>
+
+        <!-- ABOUT -->
+        <section class="page" id="p-about">
+          <div class="glass hero" style="min-height:170px"><div class="big" style="font-size:44px">Vrya</div><div style="font-size:28px;font-weight:300;opacity:.6">interface.</div>
+            <p style="margin-top:auto;opacity:.45">Version 1.0.0 · Liquid Glass design language for Roblox</p></div>
+          <div class="sec">What's inside</div>
+          <div id="feats" class="flex" style="flex-direction:column"></div>
+          <div class="sec">Notes</div>
+          <div class="sub">This page is a browser preview of vrya_ui.luau. The editor and library only display code; nothing is executed.</div>
+        </section>
+      </main>
+    </div>
+  </div>
+</div>
+
+<div class="island" id="island"><div class="dot"></div><b>Vrya</b><code id="iclock"></code></div>
+<div class="toasts" id="toasts"></div>
+<div class="hint-key" id="hintKey">Press Right Shift to toggle · drag the top bar · yellow light minimizes to the island</div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const PRESETS=[
+ {Name:"Graphite",Background:"#0E0E10",Surface:"#3A3A3F",Accent:"#E9E9EE",Text:"#F5F5F7",Border:"#D4D6DC",Glass:.80,Blur:18,Reflection:.65},
+ {Name:"Midnight",Background:"#05070F",Surface:"#26304D",Accent:"#6E95FF",Text:"#EEF2FF",Border:"#9DB2FF",Glass:.78,Blur:20,Reflection:.55},
+ {Name:"Aurora",Background:"#04110D",Surface:"#1E3D34",Accent:"#3DDC97",Text:"#EFFFF8",Border:"#A6F2D2",Glass:.76,Blur:16,Reflection:.6},
+ {Name:"Rose Quartz",Background:"#12080C",Surface:"#45283A",Accent:"#FF7AA8",Text:"#FFF1F5",Border:"#FFC6DA",Glass:.78,Blur:18,Reflection:.7},
+ {Name:"Ember",Background:"#110904",Surface:"#45301E",Accent:"#FF9F43",Text:"#FFF6EC",Border:"#FFD1A1",Glass:.80,Blur:14,Reflection:.5},
+ {Name:"Pearl",Background:"#C9CDD6",Surface:"#F4F5F8",Accent:"#0A84FF",Text:"#1C1C1E",Border:"#FFFFFF",Glass:.72,Blur:24,Reflection:.8},
+];
+const KEYS=["Background","Surface","Accent","Text","Border"];
+const store=(()=>{try{return JSON.parse(localStorage.getItem("vrya")||"{}")}catch{return{}}})();
+const save=()=>{try{localStorage.setItem("vrya",JSON.stringify(store))}catch{}};
+store.fav??={};store.custom??=[];store.snippets??=[];store.recent??=[];store.set??={orbs:true,notify:true,reduce:false,island:false};store.key??="ShiftRight";
+let T={...(store.theme||PRESETS[0])};
+
+/* ---------- color utils ---------- */
+const hex2rgb=h=>{h=h.replace("#","");if(h.length===3)h=[...h].map(c=>c+c).join("");if(!/^[0-9a-f]{6}$/i.test(h))return null;return[0,2,4].map(i=>parseInt(h.substr(i,2),16))};
+const rgb2hex=(r,g,b)=>"#"+[r,g,b].map(v=>Math.round(v).toString(16).padStart(2,"0")).join("").toUpperCase();
+function rgb2hsv(r,g,b){r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0;
+ if(d){if(mx===r)h=((g-b)/d)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h/=6;if(h<0)h+=1}return[h,mx?d/mx:0,mx]}
+function hsv2rgb(h,s,v){const i=Math.floor(h*6),f=h*6-i,p=v*(1-s),q=v*(1-f*s),t=v*(1-(1-f)*s);
+ const [r,g,b]=[[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][i%6];return[r*255,g*255,b*255]}
+const lum=h=>{const[r,g,b]=hex2rgb(h);return(.299*r+.587*g+.114*b)/255};
+
+/* ---------- theme ---------- */
+function applyTheme(persist=true){
+ const r=document.documentElement.style;
+ r.setProperty("--bg",T.Background);r.setProperty("--surface",T.Surface);r.setProperty("--accent",T.Accent);
+ r.setProperty("--text",T.Text);r.setProperty("--border",T.Border);r.setProperty("--glass",T.Glass);
+ r.setProperty("--blur",T.Blur+"px");r.setProperty("--refl",T.Reflection);
+ r.setProperty("--onacc",lum(T.Accent)>.6?"#121214":"#fff");
+ $("#sws").innerHTML=`<b>${T.Name}</b>`+KEYS.map(k=>`<div><i style="background:${T[k]}"></i><span>${k}</span><code>${T[k]}</code></div>`).join("");
+ $$(".pc").forEach(pc=>pc.style.boxShadow=pc.dataset.name===T.Name?`0 0 0 2px ${T.Accent}`:"none");
+ $("#rGlass").value=Math.round(T.Glass*100);$("#vGlass").textContent=Math.round(T.Glass*100)+"%";
+ $("#rBlur").value=T.Blur;$("#vBlur").textContent=T.Blur+" px";
+ $("#rRefl").value=Math.round(T.Reflection*100);$("#vRefl").textContent=Math.round(T.Reflection*100)+"%";
+ if(!dragging)loadTarget();
+ if(persist){store.theme=T;save()}
+ renderStats();
+}
+const setTheme=d=>{T={...d};applyTheme()};
+const edited=()=>{if(!T.Name.includes("edited"))T.Name+=" · edited"};
+
+/* ---------- toasts ---------- */
+function toast(title,body,dur=4){
+ if(!store.set.notify)return;
+ const el=document.createElement("div");el.className="toast glass";
+ el.innerHTML=`<b>${title}</b><small>now</small><p>${body}</p><div class="bar" style="animation-duration:${dur}s"></div>`;
+ const close=()=>{if(el.closing)return;el.closing=1;el.classList.add("out");setTimeout(()=>el.remove(),350)};
+ el.onclick=close;setTimeout(close,dur*1000);
+ const box=$("#toasts");box.prepend(el);while(box.children.length>4)box.lastChild.remove();
+}
+
+/* ---------- nav ---------- */
+const NAV=[["home","Home","⌂"],["library","Library","▤"],["favorites","Favorites","★"],["editor","Editor","&lt;/&gt;"],["themes","Themes","◐"],["settings","Settings","⚙"],["about","About","i"]];
+$("#nav").insertAdjacentHTML("beforeend",NAV.map(([id,t,ic])=>`<button data-go="${id}"><span class="ic" style="${id==="editor"?"font-size:11px":""}">${ic}</span><span class="lbl">${t}</span></button>`).join(""));
+let current;
+function go(id){
+ const page=id==="favorites"?"library":id;
+ const same=current&&(current==="favorites"?"library":current)===page;current=id;
+ $$("#nav button").forEach((b,i)=>{const on=b.dataset.go===id;b.classList.toggle("on",on);if(on)$("#ind").style.top=b.offsetTop+"px"});
+ $("#addr").textContent="vrya.app/"+id;
+ if(!same){$$(".page").forEach(p=>p.classList.toggle("on",p.id==="p-"+page));$("#p-"+page).scrollTop=0}
+ if(page==="library"){$("#libTitle").textContent=id==="favorites"?"Favorites":"Library";setFilter(id==="favorites"?"Favorites":(filter==="Favorites"?"All":filter))}
+}
+document.addEventListener("click",e=>{const b=e.target.closest("[data-go]");if(b)go(b.dataset.go)});
+
+/* ---------- library ---------- */
+const LIB=[
+ ["tween-playground","Tween Playground","Animation","Preview every EasingStyle on a GuiObject, one after another.",`local TweenService = game:GetService("TweenService")
+
+-- Plays each easing style on a frame so you can compare them
+local function preview(frame: Frame)
+	for _, style in Enum.EasingStyle:GetEnumItems() do
+		local info = TweenInfo.new(0.6, style, Enum.EasingDirection.Out)
+		frame.Position = UDim2.fromScale(0.1, 0.5)
+		TweenService:Create(frame, info, { Position = UDim2.fromScale(0.8, 0.5) }):Play()
+		task.wait(0.9)
+	end
+end
+
+return preview`],
+ ["spring","Spring Animator","Animation","Critically damped spring for buttery UI motion.",`local Spring = {}
+Spring.__index = Spring
+
+function Spring.new(target: number, speed: number?)
+	return setmetatable({ x = target, v = 0, target = target, speed = speed or 18 }, Spring)
+end
+
+function Spring:step(dt: number): number
+	local k = self.speed
+	local a = k * k * (self.target - self.x) - 2 * k * self.v
+	self.v += a * dt
+	self.x += self.v * dt
+	return self.x
+end
+
+return Spring`],
+ ["rainbow-text","Rainbow Text","Interface","Cycles a TextLabel through the hue wheel with RichText.",`local RunService = game:GetService("RunService")
+
+local function rainbow(label: TextLabel, text: string)
+	label.RichText = true
+	return RunService.RenderStepped:Connect(function()
+		local out, t = {}, os.clock()
+		for i = 1, #text do
+			local c = Color3.fromHSV((t * 0.2 + i * 0.04) % 1, 0.6, 1)
+			out[i] = string.format('<font color="#%s">%s</font>', c:ToHex(), text:sub(i, i))
+		end
+		label.Text = table.concat(out)
+	end)
+end`],
+ ["toast","Toast Queue","Interface","Tiny queue that shows messages one at a time.",`local Toast = { queue = {}, busy = false }
+
+function Toast.push(message: string)
+	table.insert(Toast.queue, message)
+	if Toast.busy then return end
+	Toast.busy = true
+	while #Toast.queue > 0 do
+		print("[toast]", table.remove(Toast.queue, 1))
+		task.wait(2.5)
+	end
+	Toast.busy = false
+end`],
+ ["signal","Signal Class","Utility","Lightweight connect / fire / disconnect event object.",`local Signal = {}
+Signal.__index = Signal
+
+function Signal.new()
+	return setmetatable({ handlers = {} }, Signal)
+end
+
+function Signal:Fire(...)
+	for fn in self.handlers do
+		task.spawn(fn, ...)
+	end
+end`],
+ ["debounce","Debounce","Utility","Wraps a function so rapid calls collapse into one.",`local function debounce(fn, delay: number)
+	local token = 0
+	return function(...)
+		token += 1
+		local mine = token
+		task.delay(delay, function()
+			if mine == token then fn() end
+		end)
+	end
+end`],
+ ["format","Number Formatter","Utility","1234567 to 1.23M, plus comma grouping.",`local SUFFIXES = { "", "K", "M", "B", "T" }
+
+local function short(n: number): string
+	local i = 1
+	while math.abs(n) >= 1000 and i < #SUFFIXES do
+		n /= 1000
+		i += 1
+	end
+	return string.format("%.2f%s", n, SUFFIXES[i])
+end`],
+ ["pretty","Table Printer","Learning","Recursively prints nested tables with indentation.",`local function pretty(t, indent: string?)
+	indent = indent or ""
+	for k, v in t do
+		if type(v) == "table" then
+			print(indent .. tostring(k) .. " = {")
+			pretty(v, indent .. "  ")
+			print(indent .. "}")
+		else
+			print(indent .. tostring(k) .. " = " .. tostring(v))
+		end
+	end
+end`],
+ ["types","Luau Types 101","Learning","Type annotations, unions and generics in one page.",`--!strict
+type Theme = {
+	name: string,
+	accent: Color3,
+	glass: number,
+}
+
+type Result<T> = { ok: true, value: T } | { ok: false, err: string }`],
+ ["countdown","Countdown Timer","Interface","mm:ss countdown bound to a TextLabel.",`local function countdown(label: TextLabel, seconds: number)
+	for s = seconds, 0, -1 do
+		label.Text = string.format("%02d:%02d", s // 60, s % 60)
+		task.wait(1)
+	end
+	label.Text = "Done"
+end`],
+].map(([id,name,cat,desc,code])=>({id,name,cat,desc,code}));
+const CATS=["All","Favorites","Animation","Interface","Utility","Learning","My Snippets"];
+let filter="All";
+const items=()=>[...LIB,...store.snippets.map((s,i)=>({id:"snippet:"+s.name,name:s.name,cat:"My Snippets",desc:"Saved from the editor",code:s.code,si:i}))];
+$("#chips").innerHTML=CATS.map(c=>`<button class="chip" data-cat="${c}">${c==="Favorites"?"★ Favorites":c}</button>`).join("");
+$("#chips").onclick=e=>{const c=e.target.closest(".chip");if(!c)return;setFilter(c.dataset.cat);if(current==="favorites"&&c.dataset.cat!=="Favorites"){current="library";go("library")}};
+function setFilter(c){filter=c;$$("#chips .chip").forEach(x=>x.classList.toggle("on",x.dataset.cat===c));renderLib()}
+const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function renderLib(){
+ const q=$("#q").value.toLowerCase();
+ const list=items().filter(it=>(filter==="All"||(filter==="Favorites"?store.fav[it.id]:it.cat===filter))&&(it.name+" "+it.desc+" "+it.cat).toLowerCase().includes(q));
+ $("#cards").innerHTML=list.map(it=>`<div class="glass card" data-id="${it.id}"><span class="tag">${it.cat.toUpperCase()}</span>
+  <button class="star" data-star="${it.id}">${store.fav[it.id]?"★":"☆"}</button><h3>${esc(it.name)}</h3><p>${esc(it.desc)}</p>
+  <div class="f"><small>${it.code.split("\n").length} lines</small><div class="flex">${it.si!==undefined?`<button class="btn dan sm" data-del="${it.si}">Delete</button>`:""}<button class="btn pri sm" data-open="${it.id}">Open</button></div></div></div>`).join("");
+ $("#empty").textContent=list.length?"":filter==="Favorites"?"No favorites yet. Tap ☆ on any card to star it.":filter==="My Snippets"?"No snippets yet. Save one from the Editor.":`No results for "${q}"`;
+}
+$("#q").oninput=renderLib;
+$("#cards").onclick=e=>{
+ const s=e.target.closest("[data-star]"),o=e.target.closest("[data-open]"),d=e.target.closest("[data-del]");
+ if(s){const id=s.dataset.star;store.fav[id]=!store.fav[id];if(!store.fav[id])delete store.fav[id];save();s.textContent=store.fav[id]?"★":"☆";s.classList.add("pop");setTimeout(()=>s.classList.remove("pop"),200);renderStats();if(filter==="Favorites")setTimeout(renderLib,250)}
+ if(o){const it=items().find(x=>x.id===o.dataset.open);openEditor(it.name,it.code,it.id);go("editor")}
+ if(d){const sn=store.snippets.splice(+d.dataset.del,1)[0];save();toast("Snippet deleted",sn.name);renderLib();renderStats()}
+};
+
+/* ---------- editor ---------- */
+const KW=new Set("and break do else elseif end false for function if in local nil not or repeat return then true until while continue type export".split(" "));
+const BI=new Set("game workspace script print warn error task math string table Instance Vector2 Vector3 Color3 UDim UDim2 TweenInfo Enum pairs ipairs typeof tostring tonumber require self setmetatable os select pcall".split(" "));
+function highlight(src){
+ return src.replace(/(--[^\n]*)|("(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?|`[^`\n]*`?)|(\b\d[\w.]*)|([A-Za-z_]\w*)(?=(\s*\()?)|([&<>])/g,(m,c,s,n,w,call,sym)=>{
+  if(c)return`<span style="color:color-mix(in srgb,var(--text) 45%,var(--bg))">${esc(c)}</span>`;
+  if(s)return`<span style="color:#9ede8c">${esc(s)}</span>`;
+  if(n)return`<span style="color:#ffbe6e">${n}</span>`;
+  if(w){if(KW.has(w))return`<span style="color:color-mix(in srgb,var(--accent) 55%,#ff7aa8)">${w}</span>`;
+   if(BI.has(w))return`<span style="color:color-mix(in srgb,var(--accent) 40%,#78c8ff)">${w}</span>`;
+   if(call)return`<span style="color:#82aaff">${w}</span>`;return w}
+  return esc(sym);
+ })+"\n";
+}
+function refreshEd(){const t=$("#src").value;$("#hl").innerHTML=highlight(t);const n=t.split("\n").length;
+ $("#gut").textContent=Array.from({length:n},(_,i)=>i+1).join("\n");$("#status").textContent=`${n} lines  ·  ${t.length} chars  ·  Luau  ·  preview only`;
+ const ta=$("#src");ta.style.height="0";ta.style.width="0";ta.style.height=Math.max(ta.scrollHeight,$("#ed").clientHeight)+"px";ta.style.width=Math.max(ta.scrollWidth,$("#ed").clientWidth)+"px";
+ $("#hl").style.height=ta.style.height;$("#hl").style.width=ta.style.width}
+$("#src").oninput=refreshEd;
+$("#ed").onscroll=()=>$("#gut").scrollTop=$("#ed").scrollTop;
+$("#src").onkeydown=e=>{if(e.key==="Tab"){e.preventDefault();document.execCommand("insertText",false,"\t")}};
+function openEditor(name,code,id){$("#fname").value=name;$("#src").value=code;if(id){store.recent=[id,...store.recent.filter(x=>x!==id)].slice(0,5);save();renderRecent()}refreshEd()}
+$("#eNew").onclick=()=>openEditor("untitled.luau","");
+$("#eCopy").onclick=()=>{$("#src").focus();$("#src").select();navigator.clipboard?.writeText($("#src").value).then(()=>toast("Copied","Code copied to your clipboard."),()=>toast("Selected","Press Ctrl+C to copy the code."))};
+$("#eSave").onclick=()=>{const name=$("#fname").value.trim();if(!name)return toast("Name needed","Give the snippet a file name first.");
+ const ex=store.snippets.find(s=>s.name===name);if(ex)ex.code=$("#src").value;else store.snippets.push({name,code:$("#src").value});
+ save();renderLib();renderStats();toast(ex?"Snippet updated":"Snippet saved",name+" is in Library › My Snippets.")};
+$("#qNew").onclick=()=>{openEditor("untitled.luau","-- start typing\n");go("editor")};
+
+/* ---------- home ---------- */
+function renderStats(){$("#sLib").textContent=items().length;$("#sFav").textContent=Object.keys(store.fav).length;$("#sTh").textContent=PRESETS.length+store.custom.length}
+function renderRecent(){const all=items();const r=store.recent.map(id=>all.find(x=>x.id===id)).filter(Boolean);
+ $("#recent").innerHTML=r.length?r.map(it=>`<div class="glass rowc"><div class="t"><b>${esc(it.name)}</b><span>${it.cat} · ${esc(it.desc)}</span></div><button class="btn sm" data-open="${it.id}">Open</button></div>`).join(""):`<div class="sub" style="opacity:.4">Nothing opened yet. Pick a script from the Library.</div>`}
+$("#recent").onclick=e=>{const o=e.target.closest("[data-open]");if(o){const it=items().find(x=>x.id===o.dataset.open);openEditor(it.name,it.code,it.id);go("editor")}};
+$("#qRand").onclick=()=>{const p=PRESETS[Math.floor(Math.random()*PRESETS.length)];setTheme(p);toast("Theme","Switched to "+p.Name)};
+$("#qToast").onclick=()=>toast("Hello from Vrya","Notifications stack, auto-dismiss and close on tap.",5);
+const h=new Date().getHours();$("#greet").textContent=(h<5?"Good night":h<12?"Good morning":h<18?"Good afternoon":"Good evening")+", Player";
+const t0=Date.now();let frames=0;(function f(){frames++;requestAnimationFrame(f)})();
+setInterval(()=>{$("#sFps").textContent=frames;frames=0;const s=Math.floor((Date.now()-t0)/1000);$("#sSes").textContent=Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
+ const c=new Date().toTimeString().slice(0,5);$("#clock").textContent=c;$("#iclock").textContent=c},1000);
+
+/* ---------- theme studio ---------- */
+$("#presets").innerHTML=PRESETS.map((p,i)=>`<button class="pc" data-p="${i}" data-name="${p.Name}" style="background:${p.Background};border:1px solid ${p.Border}66;color:${p.Text}">
+ <div class="w" style="background:color-mix(in srgb,color-mix(in srgb,${p.Surface} 60%,${p.Background}) ${p.Glass*100}%,transparent);border:1px solid ${p.Border}66"><i style="background:${p.Text}"></i><i style="background:${p.Text}"></i><em style="background:${p.Accent}"></em></div><span>${p.Name}</span></button>`).join("");
+$("#presets").onclick=e=>{const b=e.target.closest(".pc");if(b){setTheme(PRESETS[b.dataset.p]);toast("Theme applied",PRESETS[b.dataset.p].Name)}};
+let target="Accent",hsv=[0,0,1],dragging=false;
+$("#targets").innerHTML=KEYS.map(k=>`<button class="chip" data-t="${k}">${k}</button>`).join("");
+$("#targets").onclick=e=>{const c=e.target.closest(".chip");if(c){target=c.dataset.t;loadTarget()}};
+function loadTarget(){$$("#targets .chip").forEach(c=>c.classList.toggle("on",c.dataset.t===target));$("#editing").textContent="Editing  "+target;
+ hsv=rgb2hsv(...hex2rgb(T[target]));syncPicker()}
+function syncPicker(){const[h,s,v]=hsv;$("#sv").style.backgroundColor=`hsl(${h*360},100%,50%)`;
+ $("#svc").style.left=s*100+"%";$("#svc").style.top=(1-v)*100+"%";$("#huec").style.top=h*100+"%";
+ const hx=rgb2hex(...hsv2rgb(...hsv));$("#swatch").style.background=hx;
+ if(document.activeElement!==$("#hex"))$("#hex").value=hx;const[r,g,b]=hex2rgb(hx);
+ [["#r",r],["#g",g],["#b",b]].forEach(([id,v])=>{if(document.activeElement!==$(id))$(id).value=v})}
+function push(){T[target]=rgb2hex(...hsv2rgb(...hsv));edited();syncPicker();applyTheme()}
+function drag(el,fn){el.onpointerdown=e=>{dragging=true;el.setPointerCapture(e.pointerId);fn(e);el.onpointermove=fn;
+ el.onpointerup=()=>{dragging=false;el.onpointermove=null}}}
+drag($("#sv"),e=>{const r=$("#sv").getBoundingClientRect();hsv[1]=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width));hsv[2]=1-Math.min(1,Math.max(0,(e.clientY-r.top)/r.height));push()});
+drag($("#hue"),e=>{const r=$("#hue").getBoundingClientRect();hsv[0]=Math.min(.999,Math.max(0,(e.clientY-r.top)/r.height));push()});
+$("#hex").onchange=()=>{const c=hex2rgb($("#hex").value);if(!c){toast("Invalid HEX","Use #RRGGBB, for example #6E95FF.");return syncPicker()}hsv=rgb2hsv(...c);push()};
+["#r","#g","#b"].forEach(id=>$(id).onchange=()=>{const v=["#r","#g","#b"].map(i=>+$(i).value);if(v.some(x=>isNaN(x))){toast("Invalid RGB","Each channel must be 0 to 255.");return syncPicker()}hsv=rgb2hsv(...v.map(x=>Math.min(255,Math.max(0,x))));push()});
+$("#rGlass").oninput=e=>{T.Glass=e.target.value/100;edited();applyTheme()};
+$("#rBlur").oninput=e=>{T.Blur=+e.target.value;edited();applyTheme()};
+$("#rRefl").oninput=e=>{T.Reflection=e.target.value/100;edited();applyTheme()};
+function renderCustom(){$("#custom").innerHTML=store.custom.length?store.custom.map((d,i)=>`<div class="glass rowc"><div class="t"><b>${esc(d.Name)}</b><span>${d.Accent} · ${d.Background} · glass ${Math.round(d.Glass*100)}%</span></div>
+ <div class="dots">${KEYS.map(k=>`<i style="background:${d[k]}"></i>`).join("")}</div><button class="btn dan sm" data-cdel="${i}">Delete</button><button class="btn pri sm" data-cedit="${i}">Edit</button></div>`).join("")
+ :`<div class="sub" style="opacity:.4">No custom themes yet. Tweak the colors above, name it and press Save.</div>`}
+$("#custom").onclick=e=>{const d=e.target.closest("[data-cdel]"),ed=e.target.closest("[data-cedit]");
+ if(d){const t=store.custom.splice(+d.dataset.cdel,1)[0];save();renderCustom();renderStats();toast("Theme deleted",t.Name)}
+ if(ed){const t=store.custom[+ed.dataset.cedit];setTheme(t);$("#tname").value=t.Name;toast("Editing theme",t.Name+" is applied. Change it, then Save to overwrite.")}};
+function upsert(d){const i=store.custom.findIndex(x=>x.Name===d.Name);if(i>=0)store.custom[i]=d;else store.custom.push(d);save();renderCustom();return i>=0}
+$("#tSave").onclick=()=>{const n=$("#tname").value.trim();if(!n)return toast("Name needed","Type a name for your theme first.");T.Name=n;const rep=upsert({...T});applyTheme();toast(rep?"Theme updated":"Theme saved",n)};
+$("#tExp").onclick=()=>{$("#io").value=JSON.stringify(T);navigator.clipboard?.writeText($("#io").value).then(()=>toast("Exported","Theme JSON copied to your clipboard."),()=>toast("Exported","Theme JSON is in the box."))};
+$("#tImp").onclick=()=>{let d;try{d=JSON.parse($("#io").value)}catch{return toast("Import failed","That is not valid JSON.")}
+ if(!d||!KEYS.some(k=>hex2rgb(d[k]||"")))return toast("Import failed","No colors found. Expected keys like Accent as HEX.");
+ const t={...PRESETS[0],...d,Name:String(d.Name||"Imported")};KEYS.forEach(k=>{if(!hex2rgb(t[k]||""))t[k]=PRESETS[0][k];else t[k]=rgb2hex(...hex2rgb(t[k]))});
+ upsert(t);setTheme(t);toast("Theme imported",t.Name+" was added to Your themes.")};
+$("#tClr").onclick=()=>$("#io").value="";
+
+/* ---------- settings ---------- */
+function applySettings(){document.body.classList.toggle("noorbs",!store.set.orbs);document.body.classList.toggle("reduce",store.set.reduce);
+ $$("[data-set]").forEach(b=>b.classList.toggle("on",!!store.set[b.dataset.set]))}
+$$("[data-set]").forEach(b=>b.onclick=()=>{const k=b.dataset.set;store.set[k]=!store.set[k];save();applySettings();if(k==="notify"&&store.set[k])toast("Notifications on","You will see toasts again.")});
+let listening=false;
+const keyName=c=>c==="ShiftRight"?"RightShift":c==="ShiftLeft"?"LeftShift":c.replace(/^Key/,"");
+$("#kb").textContent=keyName(store.key);
+$("#kb").onclick=()=>{listening=true;$("#kb").textContent="Press a key…"};
+$("#rScale").oninput=e=>{$("#vScale").textContent=e.target.value+"%";document.documentElement.style.zoom=e.target.value/100};
+$("#recenter").onclick=()=>{$("#stage").style.left="50%";$("#stage").style.top="50%";delete store.pos;save()};
+$("#clrFav").onclick=()=>{store.fav={};save();renderLib();renderStats();toast("Favorites cleared","All stars were removed.")};
+let armed=false;$("#reset").onclick=()=>{if(!armed){armed=true;$("#reset").textContent="Tap again to confirm";setTimeout(()=>{armed=false;$("#reset").textContent="Reset everything"},3000);return}
+ armed=false;$("#reset").textContent="Reset everything";store.fav={};store.custom=[];store.snippets=[];store.recent=[];setTheme(PRESETS[0]);renderLib();renderCustom();renderRecent();toast("Reset","Favorites, snippets and themes were cleared.")};
+$("#feats").innerHTML=[["Liquid Glass shell","Translucent layers, silver rims, reflections and drifting chrome"],["Script library","Search, categories, favorites and your own snippets"],["Code editor","Live Luau highlighting with line numbers (display only)"],["Theme studio","HSV picker, HEX and RGB entry, presets, import and export"],["Adaptive window","Draggable, remembers its spot, scales to phones and tablets"],["Dynamic Island","Minimize into a floating pill, tap to expand"]]
+ .map(([a,b])=>`<div class="glass rowc"><div class="t"><b>${a}</b><span>${b}</span></div></div>`).join("");
+
+/* ---------- window controls ---------- */
+const stage=$("#stage"),island=$("#island");
+let visible=true;
+function collapse(withIsland){if(!visible)return;visible=false;stage.classList.add("collapsed");if(withIsland)setTimeout(()=>island.classList.add("on"),380)}
+function expand(){if(visible)return;visible=true;island.classList.remove("on");setTimeout(()=>stage.classList.remove("collapsed"),island.classList.contains("on")?180:0)}
+$("#bMin").onclick=()=>collapse(true);
+$("#bClose").onclick=()=>{collapse(store.set.island||matchMedia("(pointer:coarse)").matches);if(!store.set.island)toast("Vrya hidden","Press "+keyName(store.key)+" to bring it back.")};
+let max=false;$("#bZoom").onclick=()=>{max=!max;stage.style.width=max?"calc(100vw - 40px)":"";stage.style.height=max?"calc(100vh - 40px)":"";if(max){stage.style.left="50%";stage.style.top="50%"}};
+island.onclick=expand;
+addEventListener("keydown",e=>{
+ if(listening){e.preventDefault();listening=false;if(e.code!=="Escape"){store.key=e.code;save();toast("Keybind updated","Press "+keyName(e.code)+" to toggle Vrya.")}$("#kb").textContent=keyName(store.key);return}
+ if(e.target.matches("input,textarea"))return;
+ if(e.code===store.key){visible?collapse(store.set.island):expand()}});
+// drag
+let ds=null;$("#top").onpointerdown=e=>{if(e.target.closest(".lights")||max)return;ds={x:e.clientX,y:e.clientY,l:stage.offsetLeft,t:stage.offsetTop};$("#top").setPointerCapture(e.pointerId);stage.style.transition="none"};
+$("#top").onpointermove=e=>{if(!ds)return;stage.style.left=ds.l+e.clientX-ds.x+"px";stage.style.top=ds.t+e.clientY-ds.y+"px"};
+$("#top").onpointerup=()=>{if(!ds)return;ds=null;stage.style.transition="";store.pos=[stage.style.left,stage.style.top];save()};
+if(store.pos){stage.style.left=store.pos[0];stage.style.top=store.pos[1]}
+// responsive
+const ro=new ResizeObserver(()=>{$("#win").classList.toggle("compact",stage.offsetWidth<640);if(current)go(current)});ro.observe(stage);
+
+/* ---------- boot ---------- */
+applySettings();applyTheme(false);renderLib();renderCustom();renderRecent();renderStats();
+openEditor(LIB[0].name,LIB[0].code);go("home");
+stage.style.transform="translate(-50%,-50%) scale(.9)";requestAnimationFrame(()=>requestAnimationFrame(()=>stage.style.transform=""));
+setTimeout(()=>toast("Welcome to Vrya","Press Right Shift any time to hide or show.",5),700);
+</script>
+</body>
+</html>

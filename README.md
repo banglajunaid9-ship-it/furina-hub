@@ -20,6 +20,28 @@ Running it again replaces the previous copy instead of stacking a second one.
 - **Movement:** speed, jump, infinite jump, noclip, fly
 - **Misc:** named config profiles, FPS boost (effects, post effects, terrain grass, lowest quality, custom FPS cap, all restorable), anti AFK, unload, rejoin
 
+## Furina Hub: Strike (`furina_strike_hub.luau`)
+
+Hub for the CS-style bomb defusal shooter (placeId 114234929420007), on FurinaUI. It only reads the world, draws overlays and moves the mouse. It never fires remotes or hooks anything (the game has an anti-cheat remote, `Remotes.BAC`).
+
+- **Aimbot tab:** mouse-based aimbot (hold key, FOV circle, smoothness, head/chest/pelvis/nearest, visible-only, sticky target, auto-calibrating sensitivity), triggerbot (reaction delay, fire rate, head only), custom crosshair, hotkeys F1 ESP / F2 aimbot / F3 triggerbot, Delete = panic
+- **ESP tab:** corner or full boxes, health bar and number, names, distance, skeleton, head dot, chams (see-through slider), tracers, off-screen arrows, radar, teammates / bots / server-hidden enemies, visible-vs-hidden colours
+- **Visuals and Misc:** HUD (FPS, ping, spectators watching you, round state), fullbright, custom FOV, FPS boost and cap, anti AFK, configs (auto-save), server hop, rejoin, unload
+
+Run: put `furina_ui.luau` at `FurinaHub/furina_ui.luau` in your executor workspace (or publish it to the URL in the hub), then execute `furina_strike_hub.luau`.
+
+## Furina Hub: San Diego (`furina_sandiego_hub.luau`)
+
+Hub for San Diego Roleplay (placeId 136020512003847), on FurinaUI. The game has a server-side movement anti-cheat (teleport, fly, noclip and speed get rolled back) and flags money farming for account resets, so this hub has no teleports, fly, speed hacks, auto-farms or silent aim.
+
+- **Combat:** mouse-based aimbot (targets: not my team / everyone / police & gov / civilians / wanted only), triggerbot, no recoil, no spread, custom crosshair; F2 aimbot, F3 triggerbot
+- **ESP:** boxes, chams, skeleton, tracers, arrows; name, team and rank, health, distance, money, wanted level, held item; role or team colors, staff highlighted; F1 toggle; hides while the menu is open
+- **World:** vehicle ESP (model, owner, health, fuel, locked, car bomb), location markers from the game's own map, drop ESP, fullbright, no fog, FOV
+- **Intel:** live server, robbery and personal status; staff detector (with optional auto leave), police nearby, robbery, car bomb and wanted alerts; player inspect, spectate, and wanted / law / richest / staff lists; top-center HUD
+- **Player and Misc:** infinite stamina (sprint is the anti-cheat's speed cap), instant interact, anti AFK, FPS boost and cap, configs, server hop, rejoin, unload, Delete = panic
+
+FurinaUI dropdowns now have `:Refresh(options)` (used for the live player list); the hub works without it on older copies.
+
 ## FurinaUI
 
 `furina_ui.luau` is the hub's own interface, ported from the approved design in `ui_preview/furina_ui_v11.html` (open it in a browser to see the target look).

@@ -612,6 +612,21 @@ local function handle(it)
 		end
 	end
 	function h.Get() return it.value end
+	-- dropdowns: replace the option list (e.g. a live player list); keeps the selection if it is still offered
+	function h.Refresh(_, options, keep)
+		if it.kind ~= "dropdown" or type(options) ~= "table" then return end
+		it.opts.Options = options
+		if not keep then
+			if it.multi then
+				local nv = {}
+				for _, o in ipairs(it.value) do if table.find(options, o) then nv[#nv + 1] = o end end
+				it.value = nv
+			elseif not table.find(options, it.value) then
+				it.value = options[1]
+			end
+		end
+		if W and W.current == it.tab then W:showTab(it.tab, false, true) end
+	end
 	function h.Destroy() end
 	h.Item = it
 	return h
