@@ -152,6 +152,9 @@ local Cfg = {
 	NotifyRare = true, NotifyRarity = "Legendary", ActivityNotify = true, SummaryMins = 5,
 	-- upgrades
 	AutoFood = true, AutoStand = true, AutoFence = false, AutoOffline = true, AutoFree = true,
+	AutoIndexClaim = true, AutoBestTrail = true,
+	-- events
+	DreamHunt = true, DreamNoTrain = true, DreamClaim = true, DreamShop = true, BensDreamAlert = true,
 	-- player
 	SpeedOn = false, Speed = 50, JumpOn = false, Jump = 80, InfJump = false, Noclip = false,
 	-- misc
@@ -307,6 +310,12 @@ local MeterMath = safeRequire(Shared and Shared:FindFirstChild("ThrowMeterMath")
 local ReleaseReach = safeRequire(Shared and Shared:FindFirstChild("ReleaseReach"))
 local LuckOdds = safeRequire(Shared and Shared:FindFirstChild("LuckOdds"))
 local ClientState = safeRequire(Controllers and Controllers:FindFirstChild("ClientState"))
+-- events added by the game's Dreamland update (all optional: the hub keeps working if a later update removes them)
+local Dreamland = safeRequire(Shared and Shared:FindFirstChild("Dreamland"))
+local DreamlandConfig = safeRequire(Config and Config:FindFirstChild("DreamlandConfig"))
+local IndexRewards = safeRequire(Shared and Shared:FindFirstChild("IndexRewards"))
+local IndexRewardsConfig = safeRequire(Config and Config:FindFirstChild("IndexRewardsConfig"))
+local BensDreamConfig = safeRequire(Config and Config:FindFirstChild("BensDreamConfig"))
 
 -- rarity of a species from the game's own economy table (falls back to what a throw told us)
 local learnedRarity = {}
@@ -337,6 +346,21 @@ local function getData(key)
 	return nil
 end
 local function money() return tonumber(getData("Money")) or 0 end
+
+-- Right after joining, the game fills in your data a few seconds late. Wait for it (up to 30 s) so the hub never
+-- starts from empty values (level 0, no Dreamland collection) and announces things that are not true.
+do
+	local t0 = os.clock()
+	while alive() and os.clock() - t0 < 30 do
+		local ready = true
+		if DC and DC.IsReady then
+			local ok, v = pcall(DC.IsReady)
+			ready = ok and v == true
+		end
+		if ready and (tonumber(getData("Level")) or 0) > 0 and type(getData("Dreamland")) == "table" then break end
+		task.wait(0.25)
+	end
+end
 
 -- time from Throw_MeterStarted until the meter reaches the top (value 1)
 local function meterPeak()
@@ -675,6 +699,235 @@ local function onCatch(res, done)
 	end
 end
 
+------------------------------------------------------------------------------------------------------
+-- Dreamland event: every 30 min the habitats shift for 5 min. During that run, food landing in one of five dream
+-- zones (Taiga, Deep Waters, Mythical Paradise, Phantom Harbor, Eclipse Kingdom) has a 15% chance to catch a dream
+-- animal; the deeper into the area, the more of that zone's animals are possible. The hub lowers throw power for
+-- the run so throws land deep in the best zone you can reach, then puts your power back.
+------------------------------------------------------------------------------------------------------
+local DREAM_DEPTH = 0.95
+local origPower = tonumber(getData("ThrowPower")) or 0 -- 0 = full power (the game's default)
+local powerSet = origPower
+local Dream = { zone = nil, caught = 0, runCatches = 0, runKey = nil }
+
+local function isDreamAnimal(modelName)
+	if not modelName or not DreamlandConfig then return false end
+	if DreamlandConfig.IsEventAnimal then
+		local ok, v = pcall(DreamlandConfig.IsEventAnimal, modelName)
+		if ok then return v == true end
+	end
+	return false
+end
+
+local function dreamState()
+	if not Dreamland or not Dreamland.State then return nil end
+	local ok, st = pcall(Dreamland.State)
+	return ok and type(st) == "table" and st or nil
+end
+
+local function dreamActive()
+	local st = dreamState()
+	return st ~= nil and st.Active == true and LP:GetAttribute("Dreamland") == true
+end
+
+local function dreamData()
+	local d = getData("Dreamland")
+	return type(d) == "table" and d or {}
+end
+
+local function dreamUnique()
+	local caught = dreamData().Caught
+	if Dreamland and Dreamland.UniqueCount then
+		local ok, n = pcall(Dreamland.UniqueCount, caught)
+		if ok and type(n) == "number" then return n end
+	end
+	local n = 0
+	for _ in pairs(type(caught) == "table" and caught or {}) do n += 1 end
+	return n
+end
+
+local function dreamTotal()
+	if DreamlandConfig and DreamlandConfig.AllAnimals then
+		local ok, list = pcall(DreamlandConfig.AllAnimals)
+		if ok and type(list) == "table" then return #list end
+	end
+	return 24
+end
+
+local function maxPower()
+	local lvl = tonumber(getData("Level")) or 1
+	if LevelConfig and LevelConfig.ThrowPowerForLevel then
+		local ok, p = pcall(LevelConfig.ThrowPowerForLevel, lvl)
+		if ok and type(p) == "number" then return p end
+	end
+	return math.huge
+end
+
+local function areaByKey(key)
+	for i, a in ipairs(AreasConfig and AreasConfig.List or {}) do
+		if a.Key == key then return i, a end
+	end
+	return nil
+end
+
+-- The zone to hunt in: one you can reach that still has animals missing, the deepest of those; when every
+-- reachable zone is complete, the deepest reachable zone (its animals give the most Research Tokens).
+local function pickDreamZone()
+	if not DreamlandConfig or type(DreamlandConfig.Zones) ~= "table" then return nil end
+	local reach = maxPower() + 19
+	local caught = dreamData().Caught
+	caught = type(caught) == "table" and caught or {}
+	local best, bestMissing
+	for _, z in ipairs(DreamlandConfig.Zones) do
+		local idx, a = areaByKey(z.Area)
+		if a and a.StartDistance and a.Length then
+			local target = a.StartDistance + a.Length * DREAM_DEPTH
+			if target <= reach then
+				local missing = 0
+				for _, nm in ipairs(z.Animals or {}) do
+					if not caught[nm] then missing += 1 end
+				end
+				local better = not best
+					or (missing > 0 and bestMissing == 0)
+					or ((missing > 0) == (bestMissing > 0) and idx > best.idx)
+				if better then
+					best, bestMissing = { idx = idx, area = a, zone = z, target = target, missing = missing }, missing
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function setThrowPower(p)
+	p = math.floor(tonumber(p) or 0)
+	if p == powerSet then return true end
+	local r = invoke("Player_SetThrowPower", p)
+	if r.Ok then
+		powerSet = p
+		return true
+	end
+	Dream.powerError = tostring(r.Reason) -- kept for the debug handle; the next tick retries
+	return false, r.Reason
+end
+cleanup(function()
+	if powerSet ~= origPower then pcall(invoke, "Player_SetThrowPower", origPower) end
+end)
+
+-- called before every throw: aim at the dream zone during a run, otherwise throw at your normal power
+local function applyThrowPower()
+	if Cfg.DreamHunt and dreamActive() then
+		local z = pickDreamZone()
+		if z then
+			local minP = (LevelConfig and LevelConfig.MinThrowPower) or 18
+			-- distance = power + meter bonus (up to 20 studs at a perfect meter)
+			local p = math.clamp(z.target - 19.5, minP, maxPower())
+			setThrowPower(p)
+			if Dream.zone ~= z.area.Name then
+				Dream.zone = z.area.Name
+				notifyAct("dreamzone", 20, "Dreamland run!", string.format("Hunting dream animals in %s (%d/%d caught)",
+					tostring(z.area.Name), dreamUnique(), dreamTotal()), "nights_stay")
+			end
+			return z
+		end
+	end
+	Dream.zone = nil
+	setThrowPower(origPower)
+	return nil
+end
+
+-- milestone rewards and the token shop (cash/training boosts); both work from anywhere
+local lastDreamEcon = 0
+local function dreamEconomy()
+	if not Dreamland or not DreamlandConfig then return end
+	if os.clock() - lastDreamEcon < 10 then return end
+	lastDreamEcon = os.clock()
+	local d = dreamData()
+	if Cfg.DreamClaim and Dreamland.ClaimableMilestones then
+		local ok, list = pcall(Dreamland.ClaimableMilestones, d)
+		if ok and type(list) == "table" then
+			for _, i in ipairs(list) do
+				local r = invoke("Dreamland_Action", "Claim", i)
+				if r.Ok then
+					local m = DreamlandConfig.Milestones and DreamlandConfig.Milestones[i]
+					notifyAct("dreamclaim" .. tostring(i), 5, "Dreamland reward", "Claimed: " .. tostring(m and m.Text or ("milestone " .. i)), "redeem")
+				end
+				task.wait(0.2)
+			end
+		end
+	end
+	if Cfg.DreamShop and type(DreamlandConfig.Shop) == "table" then
+		for _, item in ipairs(DreamlandConfig.Shop) do
+			if item.Kind == "Boost" and item.Key then
+				d = dreamData()
+				local left = 0
+				if Dreamland.StockLeft then
+					local ok, v = pcall(Dreamland.StockLeft, d, item)
+					left = ok and (v or 0) or 0
+				end
+				if left > 0 and (tonumber(d.Tokens) or 0) >= (item.Price or math.huge) then
+					local r = invoke("Dreamland_Action", "Buy", item.Key)
+					if r.Ok then
+						notifyAct("dreamshop" .. item.Key, 5, "Dream shop", "Bought " .. tostring(item.Name), "shopping_bag")
+					end
+					task.wait(0.2)
+				end
+			end
+		end
+	end
+end
+
+------------------------------------------------------------------------------------------------------
+-- Index rewards: finishing an area's Index unlocks a trail with a small cash/XP bonus. Claim them all and wear
+-- the one with the biggest cash bonus.
+------------------------------------------------------------------------------------------------------
+local lastIndexEcon = 0
+local function indexEconomy()
+	if not IndexRewards or not DC then return end
+	if os.clock() - lastIndexEcon < 20 then return end
+	lastIndexEcon = os.clock()
+	local okP, pd = pcall(DC.GetPlayerData, DC)
+	if not okP or type(pd) ~= "table" then return end
+	if Cfg.AutoIndexClaim and IndexRewards.Claimable then
+		local ok, list = pcall(IndexRewards.Claimable, pd)
+		if ok and type(list) == "table" then
+			for _, key in ipairs(list) do
+				local r = invoke("IndexRewards_Claim", key)
+				if r.Ok then notifyAct("index" .. tostring(key), 5, "Index reward", "Unlocked the " .. tostring(key) .. " trail", "military_tech") end
+				task.wait(0.2)
+			end
+		end
+	end
+	if Cfg.AutoBestTrail and IndexRewardsConfig and type(IndexRewardsConfig.Trails) == "table" then
+		okP, pd = pcall(DC.GetPlayerData, DC)
+		local owned = okP and type(pd) == "table" and type(pd.Trails) == "table" and pd.Trails.Owned or {}
+		local bestKey, bestScore
+		for key in pairs(owned) do
+			local t = IndexRewardsConfig.Trails[key]
+			local b = t and t.Bonus or {}
+			local score = (tonumber(b.Cash) or 0) * 1000 + (tonumber(b.Xp) or 0)
+			if not bestScore or score > bestScore then bestKey, bestScore = key, score end
+		end
+		local equipped = okP and type(pd) == "table" and type(pd.Trails) == "table" and pd.Trails.Equipped
+		if bestKey and bestKey ~= equipped then
+			local r = invoke("IndexRewards_Equip", bestKey)
+			if r.Ok then notifyAct("trail", 30, "Trail equipped", "Now wearing the " .. tostring(bestKey) .. " trail (best bonus)", "auto_awesome") end
+		end
+	end
+end
+
+-- Ben's Dream is a live event (a cart ride where you throw at dragons). It cannot be farmed safely without
+-- playing it, so the hub only tells you when it starts.
+local bensLive = false
+local function bensDreamLive()
+	if not BensDreamConfig then return false end
+	local key = "LiveEvent_" .. tostring(BensDreamConfig.EventName or "BensDream")
+	local stage = workspace:GetAttribute(key)
+	local rideEnd = workspace:GetAttribute(BensDreamConfig.RideEndAttribute or "BensDreamRideEnd")
+	return (stage ~= nil and stage ~= false and stage ~= "")
+		or (type(rideEnd) == "number" and rideEnd > workspace:GetServerTimeNow())
+end
+
 -- one full throw; returns true on a catch
 -- Server flow: Throw_Start (at the line) -> it moves you to the launch point -> Throw_MeterStarted -> wait for the
 -- meter peak -> Throw_Resolve(1) -> Throw_Complete (yields ~5 s, gives the animal).
@@ -724,6 +977,7 @@ local function doThrow()
 	end
 	if LP:GetAttribute("Training") or training then stopTraining() task.wait(0.2) end
 	local t0 = os.clock()
+	pcall(applyThrowPower)
 
 	if (hrp.Position - throwSpot().Position).Magnitude > 4 then
 		setStatus((Cfg.Movement == "Walk" and "Walking" or Cfg.Movement == "Fly" and "Flying" or "Teleporting") .. " to the throw line")
@@ -843,6 +1097,18 @@ local function doThrow()
 	end
 	Stats.cycleSum += os.clock() - t0
 	onCatch(res, done)
+	if res.Dream == true or isDreamAnimal(res.ModelName) then
+		Dream.caught += 1
+		Dream.runCatches += 1
+		Stats.log[1] = (Stats.log[1] or "") .. " DREAM"
+		local dname, darea = tostring(res.DisplayName or res.ModelName), tostring(res.AreaName or Dream.zone or "?")
+		task.delay(1.5, function() -- wait for the collection to replicate so the count is right
+			if not alive() then return end
+			lastNoteAt = math.min(lastNoteAt, os.clock() - 4) -- dream catches are rare: always worth a message
+			notifyAct("dreamcatch", 3, "Dream animal!", string.format("%s caught in %s (%d/%d in your collection)",
+				dname, darea, dreamUnique(), dreamTotal()), "auto_awesome")
+		end)
+	end
 	return true
 end
 
@@ -938,7 +1204,8 @@ end
 -- mutated ones (when Never Sell Mutated is on), species whose rarity is unknown, or anything seen less than 4 s ago
 -- (its placement and mutation may not have replicated yet).
 local function sellable(id, a, now)
-	if type(a) ~= "table" or a.Placed or a.Bought then return false end
+	if type(a) ~= "table" or a.Placed or a.Bought or a.Dream then return false end
+	if isDreamAnimal(a.ModelName) then return false end -- limited-event animals are never sold
 	if Cfg.KeepMutated and a.Mutation then return false end
 	local info = tracked[id]
 	if Cfg.SellScope ~= "Whole backpack" and not info then return false end
@@ -995,7 +1262,8 @@ local function sellPreview()
 	for id, a in pairs(animals) do
 		local info = tracked[id]
 		local seenOk = (info and now - info.t >= 4) or (firstSeen[id] and now - firstSeen[id] >= 4) or (not info and Cfg.SellScope == "Whole backpack")
-		if seenOk and type(a) == "table" and not a.Placed and not a.Bought and not (Cfg.KeepMutated and a.Mutation)
+		if seenOk and type(a) == "table" and not a.Placed and not a.Bought and not a.Dream and not isDreamAnimal(a.ModelName)
+			and not (Cfg.KeepMutated and a.Mutation)
 			and (Cfg.SellScope == "Whole backpack" or info) then
 			local r = info and info.r or RARITY_INDEX[rarityOf(a.ModelName) or ""]
 			if r and r > 0 and r < (RARITY_INDEX[Cfg.KeepRarity] or 3) then
@@ -1033,6 +1301,8 @@ local function backgroundEconomy(afterCatchToo)
 				end
 			end
 			if Cfg.AutoSell then autoSell() end
+			dreamEconomy()
+			indexEconomy()
 			if now - lastOffline > 60 then
 				lastOffline = now
 				if Cfg.AutoOffline then invoke("Offline_Claim") end
@@ -1049,6 +1319,11 @@ local function economy(force)
 	lastEconomy = now
 	backgroundEconomy(false)
 	if inThrow then return end
+	-- a Dreamland run ended while nothing was throwing: give the player their normal power back
+	if powerSet ~= origPower and not (Cfg.AutoThrow and Cfg.DreamHunt and dreamActive()) then
+		Dream.zone = nil
+		pcall(setThrowPower, origPower)
+	end
 	if Cfg.AutoFood then pcall(buyFoods) end
 	if Cfg.AutoStand then pcall(upgradeStands) end
 	if Cfg.AutoFence then pcall(upgradeFence) end
@@ -1065,6 +1340,7 @@ local sinceBreak, nextBreak = 0, math.random(18, 35)
 -- not look like a metronome. Returns early if farming is switched off.
 local function humanPause()
 	if not Cfg.HumanPace then return end
+	if Cfg.DreamHunt and dreamActive() then return end -- never rest during a 5-minute Dreamland run
 	local function wait(secs, label)
 		local untilT = os.clock() + secs
 		while alive() and Cfg.AutoThrow and os.clock() < untilT do
@@ -1121,7 +1397,11 @@ task.spawn(function()
 			end
 			economy(false)
 
-			if Cfg.AutoThrow and Cfg.AutoTrain then
+			-- during a Dreamland run every second counts: throw only, no training in between
+			local dreamRush = Cfg.AutoThrow and Cfg.DreamHunt and Cfg.DreamNoTrain and dreamActive()
+			if dreamRush then
+				throwStep()
+			elseif Cfg.AutoThrow and Cfg.AutoTrain then
 				-- alternate: train for TrainSecs, then one throw
 				if os.clock() < trainUntil then
 					if not LP:GetAttribute("Training") then
@@ -1366,6 +1646,9 @@ cleanup(function() if Cfg.AutoSave then saveCfg() end end)
 ------------------------------------------------------------------------------------------------------
 -- 9. UI
 ------------------------------------------------------------------------------------------------------
+-- The menu lives in its own function: Luau allows at most 200 locals per function, and the farm code above already
+-- uses most of the main chunk's budget.
+local function buildUI()
 if unloaded then return end -- a newer copy already replaced this one while it was starting up
 local Window = UI:CreateWindow({
 	Name = "Furina Hub",
@@ -1530,6 +1813,25 @@ button(Upg, "Claim Offline Cash", nil, function()
 	local r = invoke("Offline_Claim")
 	notify("Offline", r.Ok and "Claimed" or ("Nothing to claim (" .. tostring(r.Reason) .. ")"), "info")
 end)
+
+-- Events -------------------------------------------------------------------------------------------------
+local Events = tab("Events", FURINA and "luck" or "event")
+local dreamLabel = infoLabel(Events, 4, 1)
+head(Events, "Dreamland")
+tog(Events, "Dreamland Hunt", "DreamHunt", "During each 5-minute habitat shift (every 30 min), aims your throws deep into the best dream zone you can reach. Your normal power comes back after the run")
+tog(Events, "Throw Only During Runs", "DreamNoTrain", "Skips training while a run is on, so you get the most throws in the 5 minutes")
+tog(Events, "Auto Claim Research Rewards", "DreamClaim", "Claims Mr. Hush's milestone rewards (boosts, super throws, potions, the Dream Dragon) as soon as you reach them")
+tog(Events, "Auto Buy Dream Boosts", "DreamShop", "Spends Research Tokens on the 2x cash and 2x training boosts (2 of each per day)")
+button(Events, "Claim Rewards Now", nil, function()
+	lastDreamEcon = 0
+	dreamEconomy()
+	notify("Dreamland", string.format("%d/%d dream animals, %s tokens", dreamUnique(), dreamTotal(), tostring(dreamData().Tokens or 0)), "check_circle")
+end)
+head(Events, "Index rewards")
+tog(Events, "Auto Claim Index Trails", "AutoIndexClaim", "Claims the trail you unlock by finishing an area's Index")
+tog(Events, "Wear Best Trail", "AutoBestTrail", "Always wears the trail with the biggest cash bonus")
+head(Events, "Ben's Dream")
+tog(Events, "Ben's Dream Alert", "BensDreamAlert", "Tells you when the Ben's Dream live event starts so you can play it (the hub does not play it for you)")
 
 -- Safety -------------------------------------------------------------------------------------------------
 local Safe = tab("Safety", FURINA and "hitbox" or "shield")
@@ -1779,6 +2081,60 @@ local function safetyText()
 		Cfg.HumanMeter and "human" or "always perfect", Cfg.HumanPace and "human (breaks on)" or "max speed")
 end
 
+local function dreamText()
+	if not Dreamland then return "Dreamland is not in this version of the game.\n-\n-\n-" end
+	local st = dreamState() or {}
+	local now = workspace:GetServerTimeNow()
+	local line1
+	if st.Active and st.RunEnd then
+		line1 = string.format("Dreamland: RUN ACTIVE, %s left%s", fmtTime(st.RunEnd - now), Dream.zone and (" (hunting in " .. Dream.zone .. ")") or "")
+	elseif st.NextStart then
+		line1 = "Dreamland: next habitat shift in " .. fmtTime(st.NextStart - now)
+	elseif st.Ended then
+		line1 = "Dreamland: the event has ended"
+	else
+		line1 = "Dreamland: not open yet"
+	end
+	local d = dreamData()
+	local claimable = 0
+	if Dreamland.ClaimableMilestones then
+		local ok, list = pcall(Dreamland.ClaimableMilestones, d)
+		if ok and type(list) == "table" then claimable = #list end
+	end
+	local z = pickDreamZone()
+	local zoneText = z and string.format("Best zone you reach: %s (%d animal%s still missing there)", tostring(z.area.Name), z.missing, z.missing == 1 and "" or "s")
+		or "No dream zone in reach yet"
+	local ends = st.EndsAt and ("event ends in " .. fmtTime(st.EndsAt - now)) or ""
+	return string.format("%s\nCollection %d/%d  |  tokens %s  |  potions %s  |  rewards to claim %d\n%s\nThis session: %d dream animal%s  |  %s",
+		line1, dreamUnique(), dreamTotal(), tostring(d.Tokens or 0), tostring(d.Potions or 0), claimable, zoneText,
+		Dream.caught, Dream.caught == 1 and "" or "s", ends)
+end
+
+-- event start/end messages
+local lastDreamActive, lastBensLive = nil, nil
+local function eventsTick()
+	local active = dreamActive()
+	if lastDreamActive ~= nil and active ~= lastDreamActive then
+		if active then
+			Dream.runCatches = 0
+			notifyAct("dreamstart", 60, "Dreamland run started", Cfg.DreamHunt and Cfg.AutoThrow
+				and "Habitats shifted for 5 minutes. Hunting dream animals now." or "Habitats shifted for 5 minutes. Turn on Auto Throw + Dreamland Hunt to catch dream animals.", "nights_stay")
+		else
+			Dream.zone = nil
+			if not inThrow then pcall(setThrowPower, origPower) end -- full power back right away
+			notifyAct("dreamend", 60, "Dreamland run over", string.format("%d dream animal%s this run. Next shift in 25 minutes.",
+				Dream.runCatches, Dream.runCatches == 1 and "" or "s"), "bedtime")
+		end
+	end
+	lastDreamActive = active
+	local live = bensDreamLive()
+	if Cfg.BensDreamAlert and lastBensLive == false and live then
+		lastNoteAt = math.min(lastNoteAt, os.clock() - 4)
+		notifyAct("bens", 120, "Ben's Dream is live!", "Throw food at the sleeping dragons from the cart ride for rewards and a pet. Join it in game.", "celebration")
+	end
+	lastBensLive = live
+end
+
 -- milestones and the periodic summary (activity notifications)
 local lastArea, lastLevelMark
 local snap = { t = os.clock(), throws = 0, earned = 0, level = tonumber(getData("Level")) or 0, rare = 0 }
@@ -1790,6 +2146,7 @@ local function rareCount()
 	return n
 end
 local function milestones(lvl)
+	if (lvl or 0) <= 0 then return end -- data not loaded yet
 	local areaIdx = ReleaseReach and call(ReleaseReach.AreaForLevel, lvl)
 	if areaIdx then
 		if lastArea and areaIdx > lastArea then
@@ -1824,6 +2181,7 @@ task.spawn(function()
 		local elapsed = math.max(1, os.clock() - Stats.start)
 		local lvl = tonumber(getData("Level")) or 0
 		pcall(milestones, lvl)
+		pcall(eventsTick)
 		setLabel(statusLabel, "Status: " .. Stats.status)
 		setLabel(statsLabel, string.format("Throws %d (%.0f/hour) | Caught %d | Sold %d (%s)\nLevel %d (+%d) | Money %s | %s/s\nBest: %s",
 			Stats.throws, Stats.throws / elapsed * 3600, Stats.caught, Stats.sold, fmtMoney(Stats.soldFor),
@@ -1840,6 +2198,7 @@ task.spawn(function()
 			setLabel(infoSession, sessionText())
 			setLabel(infoServer, serverText())
 			setLabel(safetyLabel, safetyText())
+			setLabel(dreamLabel, dreamText())
 		end)
 		if not okI then warn("[Furina Animals] info: " .. tostring(err)) task.wait(4) end
 		task.wait(1)
@@ -1847,7 +2206,7 @@ task.spawn(function()
 end)
 
 -- handles for an executor console (and for testing)
-local tabs = { Farm = Farm, Animals = Animals, Upgrades = Upg, Safety = Safe, Info = Info, Player = Plr, Misc = Misc }
+local tabs = { Farm = Farm, Animals = Animals, Upgrades = Upg, Events = Events, Safety = Safe, Info = Info, Player = Plr, Misc = Misc }
 local Debug = {
 	Cfg = Cfg, Stats = Stats, tracked = tracked, doThrow = doThrow, startTraining = startTraining, stopTraining = stopTraining,
 	buyFoods = buyFoods, upgradeStands = upgradeStands, upgradeFence = upgradeFence, autoSell = autoSell, sellPreview = sellPreview,
@@ -1860,9 +2219,11 @@ local Debug = {
 	showTab = function(name) if tabs[name] and Window.SelectTab then Window:SelectTab(tabs[name]) end end,
 	texts = function()
 		return { progress = progressText(), money = moneyText(), shop = shopText(), animals = animalsText(), session = sessionText(),
-			server = serverText(), safety = safetyText() }
+			server = serverText(), safety = safetyText(), dream = dreamText() }
 	end,
 	staffHere = staffHere, meterOffset = meterOffset, walkTo = walkTo, noteLog = noteLog,
+	Dream = Dream, dreamActive = dreamActive, pickDreamZone = pickDreamZone, applyThrowPower = applyThrowPower,
+	dreamEconomy = dreamEconomy, indexEconomy = indexEconomy, power = function() return powerSet, origPower end,
 }
 if not unloaded then
 	getgenv().FurinaAnimalsDebug = Debug
@@ -1875,3 +2236,5 @@ end)
 if Cfg.FPSBoost then setBoost(true) end
 if Window.Ready then Window:Ready() end
 notify("Furina Hub", "Throw Food For Animals loaded. Turn on Auto Throw in the Farm tab.", "check_circle")
+end
+buildUI()

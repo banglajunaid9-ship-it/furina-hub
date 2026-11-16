@@ -58,13 +58,13 @@ class Icon:
     def P(self, p):
         return (p[0] * self.k, p[1] * self.k)
 
-    def line(self, pts, w=None):
+    def line(self, pts, w=None, fill=255):
         w = self.w if w is None else w * self.k
         pts = [self.P(p) for p in pts]
-        self.d.line(pts, fill=255, width=int(round(w)))
+        self.d.line(pts, fill=fill, width=int(round(w)))
         r = w / 2
         for x, y in pts:
-            self.d.ellipse((x - r, y - r, x + r, y + r), fill=255)
+            self.d.ellipse((x - r, y - r, x + r, y + r), fill=fill)
 
     def circle(self, c, r, w=None):
         w = self.w if w is None else w * self.k
@@ -81,8 +81,33 @@ class Icon:
     def poly(self, pts, fill=255):
         self.d.polygon([self.P(p) for p in pts], fill=fill)
 
-    def done(self):
-        a = self.img.resize((self.size, self.size), Image.LANCZOS)
+    def rrect(self, box, radius, w=None, fill=False):
+        x0, y0, x1, y1 = [v * self.k for v in box]
+        r = radius * self.k
+        if fill:
+            self.d.rounded_rectangle((x0, y0, x1, y1), radius=r, fill=255)
+            return
+        w = self.w if w is None else w * self.k
+        self.d.rounded_rectangle((x0 - w / 2, y0 - w / 2, x1 + w / 2, y1 + w / 2), radius=r + w / 2, fill=255)
+        self.d.rounded_rectangle((x0 + w / 2, y0 + w / 2, x1 - w / 2, y1 - w / 2), radius=max(1, r - w / 2), fill=0)
+
+    def arcln(self, cx, cy, r, a0, a1, w=None, n=24):
+        self.line(arc(cx, cy, r, a0, a1, n), w=w)
+
+    def done(self, cozy=True):
+        src = self.img
+        if cozy:
+            # soften: blur + re-threshold rounds every sharp corner (stars, bolts, arrow tips) into a pillowy edge
+            u = self.k  # px per grid unit at supersampled size
+            b = np.asarray(src.filter(ImageFilter.GaussianBlur(0.7 * u)), dtype=np.float32) / 255
+            core = np.clip((b - 0.5) * 3.2 + 0.5, 0, 1)
+            # faint warm halo hugging the stroke, so tinted icons read as gently glowing rather than etched
+            halo = np.asarray(Image.fromarray((core * 255).astype("uint8")).filter(ImageFilter.GaussianBlur(1.3 * u)), dtype=np.float32) / 255
+            src = Image.fromarray((np.maximum(core, halo * 0.34) * 255).astype("uint8"))
+        a = src.resize((self.size, self.size), Image.LANCZOS)
+        # 16 alpha levels: invisible at menu size, and the PNGs shrink ~half (smaller than the hard-edged originals)
+        q = np.asarray(a, dtype=np.float32)
+        a = Image.fromarray((np.round(q / 255 * 15) * 17).astype("uint8"))
         out = Image.new("RGBA", a.size, (255, 255, 255, 0))
         out.putalpha(a)
         return out
@@ -207,11 +232,581 @@ def icon_info(i):
     i.disc((12, 7.8), 1.3)
 
 
+# ---- extra icons (lucide-style) ----
+def icon_eye(i):
+    icon_esp(i)
+
+
+def icon_zap(i):
+    i.poly([(13, 2), (4, 13.5), (10.5, 13.5), (9.5, 22), (19, 9.5), (12.5, 9.5)])
+
+
+def icon_swords(i):
+    i.line([(14.5, 17.5), (3, 6), (3, 3), (6, 3), (17.5, 14.5)], w=2.2)
+    i.line([(13, 19), (16, 16)], w=2.2)
+    i.line([(19, 21), (21, 19)], w=2.2)
+    i.line([(14.5, 6.5), (18, 3), (21, 3), (21, 6), (17.5, 9.5)], w=2.2)
+    i.line([(5, 14), (9, 18)], w=2.2)
+    i.line([(7, 17), (4, 20)], w=2.2)
+    i.line([(3, 19), (5, 21)], w=2.2)
+
+
+def icon_user(i):
+    i.circle((12, 8), 4, w=2.1)
+    i.line(arc(12, 20.5, 7, 200, 340), w=2.1)
+
+
+def icon_users(i):
+    i.circle((9, 8.5), 3.3, w=1.9)
+    i.line(arc(9, 20, 6, 205, 335), w=1.9)
+    i.arcln(16, 8.5, 3.3, -60, 60, w=1.9)
+    i.line(arc(17.5, 19.5, 5.5, 250, 340), w=1.9)
+
+
+def icon_package(i):
+    i.line([(12, 2.5), (20.5, 7), (20.5, 17), (12, 21.5), (3.5, 17), (3.5, 7), (12, 2.5)], w=2.0)
+    i.line([(3.5, 7), (12, 11.5), (20.5, 7)], w=2.0)
+    i.line([(12, 11.5), (12, 21.5)], w=2.0)
+    i.line([(7.75, 4.75), (16.25, 9.25)], w=1.6)
+
+
+def icon_map_pin(i):
+    i.line(cubic((12, 22), (12, 22), (20, 13.5), (20, 9), 16) + arc(12, 9, 8, 0, -180, 24)[1:] + cubic((4, 9), (4, 13.5), (12, 22), (12, 22), 16)[1:], w=2.0)
+    i.circle((12, 9), 2.6, w=1.8)
+
+
+def icon_bell(i):
+    i.line(cubic((6, 17), (6, 11), (6.5, 7.5), (12, 7.5), 18) + cubic((12, 7.5), (17.5, 7.5), (18, 11), (18, 17), 18)[1:], w=2.0)
+    i.line([(4.5, 17), (19.5, 17)], w=2.0)
+    i.line([(12, 5), (12, 7.5)], w=2.0)
+    i.arcln(12, 18.5, 2.2, 20, 160, w=1.9)
+
+
+def icon_shield(i):
+    i.line([(12, 2.5), (20, 5.5), (20, 11), (12, 21.5), (4, 11), (4, 5.5), (12, 2.5)], w=2.0)
+
+
+def icon_crosshair(i):
+    i.circle((12, 12), 8, w=2.0)
+    for a, b in [((12, 1.5), (12, 5)), ((12, 19), (12, 22.5)), ((1.5, 12), (5, 12)), ((19, 12), (22.5, 12))]:
+        i.line([a, b], w=2.0)
+    i.disc((12, 12), 1.4)
+
+
+def icon_target(i):
+    i.circle((12, 12), 9, w=2.0)
+    i.circle((12, 12), 5, w=2.0)
+    i.disc((12, 12), 1.8)
+
+
+def icon_flame(i):
+    i.line(cubic((12, 2.5), (14, 6), (19, 9.5), (19, 14.5), 18) + arc(12, 14.5, 7, 0, 180, 26)[1:]
+           + cubic((5, 14.5), (5, 11), (6.5, 9), (8.5, 7.5), 12)[1:] + cubic((8.5, 7.5), (8.5, 10), (10, 11), (11, 10.5), 10)[1:]
+           + cubic((11, 10.5), (12.5, 8.5), (11, 5), (12, 2.5), 12)[1:], w=2.0)
+    i.line(cubic((12, 12.8), (14, 14.6), (14.5, 15.6), (14.5, 16.8), 10) + arc(12, 16.8, 2.5, 0, 180, 14)[1:]
+           + cubic((9.5, 16.8), (9.5, 15.6), (10, 14.6), (12, 12.8), 10)[1:], w=1.7)
+
+
+def icon_droplet(i):
+    i.line(cubic((12, 2.5), (18, 10), (20, 14), (20, 16.5), 18) + arc(12, 16.5, 8, 0, 180, 26)[1:] + cubic((4, 16.5), (4, 14), (6, 10), (12, 2.5), 18)[1:], w=2.0)
+
+
+def icon_snowflake(i):
+    for a in (0, 60, 120):
+        ra = math.radians(a)
+        dx, dy = 9 * math.cos(ra), 9 * math.sin(ra)
+        i.line([(12 - dx, 12 - dy), (12 + dx, 12 + dy)], w=1.8)
+    for a in (0, 60, 120, 180, 240, 300):
+        ra = math.radians(a)
+        bx, by = 12 + 6 * math.cos(ra), 12 + 6 * math.sin(ra)
+        for da in (-35, 35):
+            r2 = math.radians(a + 180 + da)
+            i.line([(bx, by), (bx + 3 * math.cos(r2), by + 3 * math.sin(r2))], w=1.6)
+
+
+def icon_crown(i):
+    i.line([(3, 8), (7, 16), (12, 6), (17, 16), (21, 8), (19, 19), (5, 19), (3, 8)], w=2.0)
+    for cx, cy in ((3, 8), (12, 6), (21, 8)):
+        i.disc((cx, cy), 1.4)
+
+
+def icon_sparkles(i):
+    def star(cx, cy, r):
+        i.poly([(cx, cy - r), (cx + r * 0.32, cy - r * 0.32), (cx + r, cy), (cx + r * 0.32, cy + r * 0.32),
+                (cx, cy + r), (cx - r * 0.32, cy + r * 0.32), (cx - r, cy), (cx - r * 0.32, cy - r * 0.32)])
+    star(10, 10, 6)
+    star(18, 17, 3.2)
+    star(18.5, 6, 2.2)
+
+
+def icon_heart(i):
+    pts = []
+    for n in range(73):
+        t = 2 * math.pi * n / 72
+        x = 16 * math.sin(t) ** 3
+        y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
+        pts.append((12 + x * 0.56, 11.2 - y * 0.56))
+    i.poly(pts)
+
+
+def icon_lock(i):
+    i.rrect((5, 11, 19, 20.5), 2.4)
+    i.arcln(12, 11, 4.2, 180, 360, w=2.0)
+    i.disc((12, 15), 1.3)
+    i.line([(12, 15), (12, 17.5)], w=1.8)
+
+
+def icon_trash(i):
+    i.line([(4, 6.5), (20, 6.5)], w=2.0)
+    i.line([(9, 6.5), (9.5, 4), (14.5, 4), (15, 6.5)], w=1.8)
+    i.line([(6, 6.5), (7, 20.5), (17, 20.5), (18, 6.5)], w=2.0)
+    for x in (10, 12, 14):
+        i.line([(x, 10), (x, 17)], w=1.5)
+
+
+def icon_refresh(i):
+    i.line(arc(12, 12, 8, -50, 200), w=2.0)
+    i.line([(4.2, 7.5), (4, 12), (8.5, 11.5)], w=2.0)
+    i.line(arc(12, 12, 8, 130, 380), w=2.0)
+    i.line([(19.8, 16.5), (20, 12), (15.5, 12.5)], w=2.0)
+
+
+def icon_download(i):
+    i.line([(12, 3), (12, 15)], w=2.0)
+    i.line([(7, 10.5), (12, 15.5), (17, 10.5)], w=2.0)
+    i.line([(4.5, 20), (19.5, 20)], w=2.0)
+
+
+def icon_play(i):
+    i.poly([(8, 5), (8, 19), (19, 12)])
+
+
+def icon_pause(i):
+    i.rrect((8, 5, 11, 19), 1.2, fill=True)
+    i.rrect((13, 5, 16, 19), 1.2, fill=True)
+
+
+def icon_folder(i):
+    i.line([(3.5, 6.5), (9.5, 6.5), (11.5, 9), (20.5, 9), (20.5, 19), (3.5, 19), (3.5, 6.5)], w=2.0)
+
+
+def icon_wifi(i):
+    i.arcln(12, 18, 10.5, -140, -40, w=2.0)
+    i.arcln(12, 18, 7, -135, -45, w=2.0)
+    i.arcln(12, 18, 3.5, -125, -55, w=2.0)
+    i.disc((12, 18), 1.4)
+
+
+def icon_gauge(i):
+    i.arcln(12, 14, 8.5, 180, 360, w=2.0)
+    i.line([(12, 14), (16, 9.5)], w=2.0)
+    i.disc((12, 14), 1.5)
+
+
+def icon_globe(i):
+    i.circle((12, 12), 9, w=1.9)
+    i.line([(3, 12), (21, 12)], w=1.6)
+    i.line([(12, 3), (12, 21)], w=1.6)
+    i.line([(12 + 5 * math.sin(math.radians(a)), 12 - 9 * math.cos(math.radians(a))) for a in range(-90, 91, 10)], w=1.5)
+    i.line([(12 - 5 * math.sin(math.radians(a)), 12 - 9 * math.cos(math.radians(a))) for a in range(-90, 91, 10)], w=1.5)
+
+
+def icon_clock(i):
+    i.circle((12, 12), 9, w=2.0)
+    i.line([(12, 7), (12, 12), (16, 14)], w=2.0)
+
+
+def icon_grid(i):
+    i.rrect((3.5, 3.5, 10.5, 10.5), 1.8)
+    i.rrect((13.5, 3.5, 20.5, 10.5), 1.8)
+    i.rrect((3.5, 13.5, 10.5, 20.5), 1.8)
+    i.rrect((13.5, 13.5, 20.5, 20.5), 1.8)
+
+
+def icon_filter(i):
+    i.line([(3, 5), (21, 5), (14, 13), (14, 20), (10, 18), (10, 13), (3, 5)], w=2.0)
+
+
+def icon_bolt(i):
+    icon_zap(i)
+
+
+# ---- batch 2: water / cozy, pets, game items, tools ----
+def ellipse_pts(cx, cy, rx, ry, n=36):
+    return [(cx + rx * math.cos(2 * math.pi * t / n), cy + ry * math.sin(2 * math.pi * t / n)) for t in range(n + 1)]
+
+
+def capsule_pts(a, b, r, n=14):
+    th = math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+    return arc(b[0], b[1], r, th - 90, th + 90, n) + arc(a[0], a[1], r, th + 90, th + 270, n) + [arc(b[0], b[1], r, th - 90, th - 90, 1)[0]]
+
+
+def small_star(i, cx, cy, r):
+    i.poly([(cx, cy - r), (cx + r * 0.3, cy - r * 0.3), (cx + r, cy), (cx + r * 0.3, cy + r * 0.3),
+            (cx, cy + r), (cx - r * 0.3, cy + r * 0.3), (cx - r, cy), (cx - r * 0.3, cy - r * 0.3)])
+
+
+def icon_waves(i):
+    for y in (6.5, 12, 17.5):
+        i.line([(x, y + 1.5 * math.sin((x - 3) / 18 * 3 * math.pi)) for x in np.linspace(3, 21, 36)], w=2.0)
+
+
+def icon_wind(i):
+    i.line([(3, 9), (14, 9)] + arc(14, 6, 3, 90, -160), w=2.0)
+    i.line([(3, 13), (18, 13)] + arc(18, 16, 3, -90, 160), w=2.0)
+    i.line([(3, 17), (9, 17)], w=2.0)
+
+
+def icon_cloud(i):
+    i.line(arc(6, 15, 4, -74, -270, 18) + arc(18, 15, 4, 90, -90, 18)[0:1], w=2.0)
+    i.line([(6, 19), (18, 19)] + arc(18, 15, 4, 90, -90, 18) + arc(12.5, 11.5, 5.5, -5, -180, 26), w=2.0)
+
+
+def icon_umbrella(i):
+    i.line(arc(12, 12, 9, 180, 360) + [(3, 12)], w=2.0)
+    i.line([(12, 12), (12, 18.5)] + arc(10, 18.5, 2, 0, 180), w=2.0)
+    i.line([(12, 3), (12, 2)], w=2.0)
+
+
+def icon_anchor(i):
+    i.circle((12, 5), 2.2, w=1.9)
+    i.line([(12, 7.2), (12, 21)], w=2.0)
+    i.line([(8, 10.5), (16, 10.5)], w=2.0)
+    i.line(arc(12, 13, 8, 0, 180), w=2.0)
+    i.line([(2.5, 15), (4, 13), (6, 14.5)], w=1.8)
+    i.line([(21.5, 15), (20, 13), (18, 14.5)], w=1.8)
+
+
+def icon_fish(i):
+    i.line(cubic((2.5, 12), (6.5, 5.5), (13.5, 5.5), (17, 12), 20) + cubic((17, 12), (13.5, 18.5), (6.5, 18.5), (2.5, 12), 20)[1:], w=2.0)
+    i.line([(17, 12), (21.5, 7.5), (21.5, 16.5), (17, 12)], w=2.0)
+    i.disc((7, 11), 1.2)
+
+
+def icon_paw(i):
+    for c in ((5.5, 11), (9.3, 6.2), (14.7, 6.2), (18.5, 11)):
+        i.disc(c, 2.15)
+    i.poly(ellipse_pts(12, 16.3, 5, 4.2))
+
+
+def icon_leaf(i):
+    i.line(cubic((4.5, 19.5), (4.5, 9), (11, 4), (20, 4), 22) + cubic((20, 4), (20, 13), (15, 19.5), (4.5, 19.5), 22)[1:], w=2.0)
+    i.line([(3, 21), (14, 10)], w=1.8)
+
+
+def icon_skull(i):
+    i.line(arc(12, 10.5, 7.5, 140, 400) + [(16, 16.6), (16, 20.5), (8, 20.5), (8, 16.6), (6.25, 15.3)], w=2.0)
+    i.disc((9, 11), 1.8)
+    i.disc((15, 11), 1.8)
+    i.line([(12, 17.5), (12, 20.5)], w=1.5)
+
+
+def icon_ghost(i):
+    i.line(arc(12, 10, 7, 180, 360) + [(19, 20.5), (16.7, 18.5), (14.3, 20.5), (12, 18.5), (9.7, 20.5), (7.3, 18.5), (5, 20.5), (5, 10)], w=2.0)
+    i.disc((9.5, 10.5), 1.25)
+    i.disc((14.5, 10.5), 1.25)
+
+
+def icon_rocket(i):
+    i.line(cubic((12, 2.5), (17, 6), (16.5, 12.5), (15, 16), 20) + [(9, 16)] + cubic((9, 16), (7.5, 12.5), (7, 6), (12, 2.5), 20), w=2.0)
+    i.circle((12, 9), 1.8, w=1.7)
+    i.line([(8.6, 12.5), (5.5, 15.5), (5.5, 18.5), (9, 16.2)], w=1.8)
+    i.line([(15.4, 12.5), (18.5, 15.5), (18.5, 18.5), (15, 16.2)], w=1.8)
+    i.line([(10.5, 18.5), (12, 21.5), (13.5, 18.5)], w=1.8)
+
+
+def icon_send(i):
+    i.line([(21.5, 2.5), (14.5, 21), (11, 13), (2.5, 9.5), (21.5, 2.5)], w=2.0)
+    i.line([(21.5, 2.5), (11, 13)], w=2.0)
+
+
+def icon_car(i):
+    i.line([(3, 16.5), (3, 12.5), (5.5, 11.5), (7.5, 7), (16.5, 7), (18.5, 11.5), (21, 12.5), (21, 16.5), (3, 16.5)], w=2.0)
+    i.line([(5.5, 11.5), (18.5, 11.5)], w=1.6)
+    i.disc((7.5, 17.5), 2.6)
+    i.disc((16.5, 17.5), 2.6)
+    i.disc((7.5, 17.5), 1.0, fill=0)
+    i.disc((16.5, 17.5), 1.0, fill=0)
+
+
+def icon_gem(i):
+    i.line([(6, 3.5), (18, 3.5), (22, 9), (12, 21), (2, 9), (6, 3.5)], w=2.0)
+    i.line([(2, 9), (22, 9)], w=1.7)
+    i.line([(9.5, 3.5), (8, 9), (12, 21), (16, 9), (14.5, 3.5)], w=1.6)
+
+
+def icon_coins(i):
+    i.circle((9, 9), 6, w=2.0)
+    run = arc(15, 15, 6, -40, 130, 40)
+    i.line(run, w=2.0)
+    i.circle((9, 9), 2.6, w=1.6)
+
+
+def icon_gift(i):
+    i.rrect((3.5, 8, 20.5, 12), 1.2)
+    i.rrect((5, 12, 19, 21), 1.2)
+    i.line([(12, 8), (12, 21)], w=1.9)
+    i.line(cubic((12, 8), (8.5, 8), (6.5, 6), (8.5, 4.2), 14) + cubic((8.5, 4.2), (10.2, 2.8), (12, 5), (12, 8), 14)[1:], w=1.8)
+    i.line(cubic((12, 8), (15.5, 8), (17.5, 6), (15.5, 4.2), 14) + cubic((15.5, 4.2), (13.8, 2.8), (12, 5), (12, 8), 14)[1:], w=1.8)
+
+
+def icon_key(i):
+    i.circle((7.5, 15.5), 4.3, w=2.0)
+    i.line([(10.6, 12.4), (20.5, 2.5)], w=2.0)
+    i.line([(17.3, 5.7), (20, 8.4)], w=2.0)
+    i.line([(14.6, 8.4), (16.6, 10.4)], w=2.0)
+
+
+def icon_magnet(i):
+    i.line([(5, 3.5), (5, 12)] + arc(12, 12, 7, 180, 0) + [(19, 3.5)], w=2.0)
+    i.line([(9, 3.5), (9, 12)] + arc(12, 12, 3, 180, 0) + [(15, 3.5)], w=2.0)
+    i.line([(5, 7.5), (9, 7.5)], w=2.0)
+    i.line([(15, 7.5), (19, 7.5)], w=2.0)
+
+
+def icon_wand(i):
+    i.line([(3.5, 20.5), (14.5, 9.5)], w=2.3)
+    small_star(i, 18, 6, 3.6)
+    small_star(i, 9, 4.5, 1.8)
+    small_star(i, 20, 13.5, 1.8)
+
+
+def icon_bomb(i):
+    i.circle((10.5, 14), 6.5, w=2.0)
+    i.line([(15, 9.5), (17, 7.5)], w=2.2)
+    i.line(cubic((17, 7.5), (18, 5), (20, 6), (20.5, 3.5), 12), w=1.8)
+    i.arcln(9, 13.5, 3.2, 200, 260, w=1.5)
+
+
+def icon_cart(i):
+    i.line([(2, 3), (5, 3), (7.5, 15), (18, 15), (20.5, 7), (6, 7)], w=2.0)
+    i.disc((9, 19.5), 1.7)
+    i.disc((17, 19.5), 1.7)
+
+
+def icon_trophy(i):
+    i.line([(7, 3.5), (17, 3.5), (17, 9)] + arc(12, 9, 5, 0, 180) + [(7, 3.5)], w=2.0)
+    i.line(arc(17, 7, 2.6, -90, 90), w=1.8)
+    i.line(arc(7, 7, 2.6, 90, 270), w=1.8)
+    i.line([(12, 14), (12, 18)], w=2.0)
+    i.line([(7.5, 20.5), (16.5, 20.5)], w=2.0)
+    i.line([(9, 18), (15, 18)], w=1.8)
+
+
+def icon_music(i):
+    i.line([(9, 18), (9, 5), (20, 3), (20, 16)], w=2.0)
+    i.line([(9, 9), (20, 7)], w=1.6)
+    i.disc((6.5, 18), 2.6)
+    i.disc((17.5, 16), 2.6)
+
+
+def icon_volume(i):
+    i.line([(3, 9), (7, 9), (12, 4.5), (12, 19.5), (7, 15), (3, 15), (3, 9)], w=2.0)
+    i.arcln(13, 12, 3.8, -45, 45, w=2.0, n=12)
+    i.arcln(13, 12, 7.5, -50, 50, w=2.0, n=16)
+
+
+def icon_camera(i):
+    i.rrect((2.5, 7, 21.5, 20), 2.6)
+    i.line([(8, 7), (9.5, 4), (14.5, 4), (16, 7)], w=2.0)
+    i.circle((12, 13.5), 3.6, w=2.0)
+
+
+def icon_pointer(i):
+    i.line([(5, 3), (5, 19), (9.3, 15.2), (12.3, 21.5), (15.2, 20.2), (12.3, 14), (18, 14), (5, 3)], w=2.0)
+
+
+def icon_keyboard(i):
+    i.rrect((2.5, 6, 21.5, 18), 2.2)
+    for y in (9.5, 12.5):
+        for x in (6, 9, 12, 15, 18):
+            i.disc((x, y), 0.95)
+    i.line([(8, 15.3), (16, 15.3)], w=1.8)
+
+
+def icon_code(i):
+    i.line([(8, 6.5), (2.5, 12), (8, 17.5)], w=2.2)
+    i.line([(16, 6.5), (21.5, 12), (16, 17.5)], w=2.2)
+    i.line([(14, 4), (10, 20)], w=1.8)
+
+
+def icon_terminal(i):
+    i.rrect((2.5, 4, 21.5, 20), 2.4)
+    i.line([(6.5, 9), (10, 12), (6.5, 15)], w=2.0)
+    i.line([(12, 15.5), (17, 15.5)], w=2.0)
+
+
+def icon_layers(i):
+    i.line([(12, 3), (21.5, 8), (12, 13), (2.5, 8), (12, 3)], w=2.0)
+    i.line([(2.5, 12.2), (12, 17.2), (21.5, 12.2)], w=2.0)
+    i.line([(2.5, 16.4), (12, 21.4), (21.5, 16.4)], w=2.0)
+
+
+def icon_link(i):
+    i.line(capsule_pts((5.5, 18.5), (10, 14), 3.3), w=2.0)
+    i.line(capsule_pts((14, 10), (18.5, 5.5), 3.3), w=2.0)
+    i.line([(9, 15), (15, 9)], w=2.0)
+
+
+def icon_copy(i):
+    i.rrect((8.5, 8.5, 20.5, 20.5), 2.2)
+    i.line([(15.5, 8.5), (15.5, 5.5)] + arc(13.5, 5.5, 2, 0, -90, 8) + [(5.5, 3.5)] + arc(5.5, 5.5, 2, -90, -180, 8) + [(3.5, 13.5)]
+           + arc(5.5, 13.5, 2, 180, 90, 8) + [(8.5, 15.5)], w=2.0)
+
+
+def icon_edit(i):
+    i.line([(16.5, 3.5), (20.5, 7.5), (8, 20), (3.5, 20.5), (4, 16), (16.5, 3.5)], w=2.0)
+    i.line([(14, 6), (18, 10)], w=1.8)
+
+
+def icon_plus(i):
+    i.line([(12, 5), (12, 19)], w=2.6)
+    i.line([(5, 12), (19, 12)], w=2.6)
+
+
+def icon_list(i):
+    for y in (6, 12, 18):
+        i.line([(9, y), (20.5, y)], w=2.0)
+        i.disc((4.5, y), 1.4)
+
+
+def icon_menu(i):
+    for y in (6, 12, 18):
+        i.line([(4, y), (20, y)], w=2.2)
+
+
+def icon_bookmark(i):
+    i.line([(6, 3.5), (18, 3.5), (18, 21), (12, 16.5), (6, 21), (6, 3.5)], w=2.0)
+
+
+def icon_flag(i):
+    i.line([(5, 22), (5, 3.5)], w=2.0)
+    i.line([(5, 4)] + cubic((5, 4), (9, 2), (14, 6), (19, 4), 16)[1:] + [(19, 14)] + cubic((19, 14), (14, 16), (9, 12), (5, 14), 16)[1:], w=2.0)
+
+
+def icon_compass(i):
+    i.circle((12, 12), 9, w=2.0)
+    i.line([(16, 8), (13.6, 13.6), (8, 16), (10.4, 10.4), (16, 8)], w=1.8)
+    i.poly([(16, 8), (13.6, 13.6), (10.4, 10.4)])
+
+
+def icon_mountain(i):
+    i.line([(2.5, 20), (9, 7.5), (13, 14), (15.5, 10.5), (21.5, 20), (2.5, 20)], w=2.0)
+
+
+def icon_eye_off(i):
+    icon_esp(i)
+    i.line([(3.5, 3.5), (20.5, 20.5)], w=4.4, fill=0)
+    i.line([(3.5, 3.5), (20.5, 20.5)], w=2.0)
+
+
+def icon_unlock(i):
+    i.rrect((5, 11, 19, 20.5), 2.4)
+    i.line([(7.8, 11), (7.8, 7.2)] + arc(12, 7.2, 4.2, 180, 330), w=2.0)
+    i.disc((12, 15), 1.3)
+    i.line([(12, 15), (12, 17.5)], w=1.8)
+
+
+def icon_bug(i):
+    i.rrect((7.5, 8.5, 16.5, 20.5), 4.4)
+    i.line(arc(12, 8.5, 3, 180, 360), w=1.9)
+    i.line([(12, 11.5), (12, 20)], w=1.6)
+    for y0, y1, x in ((11.5, 9.5, 4), (15, 15, 3.5), (18.5, 20.5, 4)):
+        i.line([(7.5, y0), (x, y1)], w=1.8)
+        i.line([(16.5, y0), (24 - x, y1)], w=1.8)
+    i.line([(10, 5.8), (8.5, 3.5)], w=1.6)
+    i.line([(14, 5.8), (15.5, 3.5)], w=1.6)
+
+
+def icon_chart(i):
+    i.line([(3.5, 3.5), (3.5, 20.5), (20.5, 20.5)], w=2.0)
+    i.line([(8, 16.5), (8, 12)], w=2.8)
+    i.line([(12.5, 16.5), (12.5, 7)], w=2.8)
+    i.line([(17, 16.5), (17, 10)], w=2.8)
+
+
+def icon_activity(i):
+    i.line([(2.5, 12), (6.5, 12), (9.5, 20), (14.5, 4), (17.5, 12), (21.5, 12)], w=2.0)
+
+
+def icon_warning(i):
+    i.line([(12, 3), (22, 20.5), (2, 20.5), (12, 3)], w=2.0)
+    i.line([(12, 9.5), (12, 14)], w=2.2)
+    i.disc((12, 17.2), 1.25)
+
+
+def icon_upload(i):
+    i.line([(12, 16), (12, 4)], w=2.0)
+    i.line([(7, 8.5), (12, 3.5), (17, 8.5)], w=2.0)
+    i.line([(4.5, 20), (19.5, 20)], w=2.0)
+
+
+def icon_logout(i):
+    i.line([(10, 3.5), (4.5, 3.5), (4.5, 20.5), (10, 20.5)], w=2.0)
+    i.line([(10, 12), (21, 12)], w=2.0)
+    i.line([(17, 8), (21, 12), (17, 16)], w=2.0)
+
+
+def icon_hourglass(i):
+    i.line([(5.5, 3), (18.5, 3)], w=2.0)
+    i.line([(5.5, 21), (18.5, 21)], w=2.0)
+    i.line([(7, 3), (7, 6), (12, 12), (17, 6), (17, 3)], w=2.0)
+    i.line([(7, 21), (7, 18), (12, 12), (17, 18), (17, 21)], w=2.0)
+
+
+def icon_battery(i):
+    i.rrect((2.5, 7, 18.5, 17), 2.2)
+    i.rrect((5, 9.5, 12, 14.5), 0.8, fill=True)
+    i.line([(21, 10.5), (21, 13.5)], w=2.4)
+
+
+def icon_sword(i):
+    i.line([(20.5, 3.5), (20.5, 7), (9.5, 18), (6, 14.5), (17, 3.5), (20.5, 3.5)], w=1.9)
+    i.line([(4.5, 12.5), (11.5, 19.5)], w=2.0)
+    i.line([(7, 17), (3.5, 20.5)], w=2.2)
+
+
+def icon_egg(i):
+    i.line(cubic((12, 2.5), (16.5, 2.5), (19.5, 9.5), (19.5, 14), 20) + arc(12, 14, 7.5, 0, 180, 26)[1:]
+           + cubic((4.5, 14), (4.5, 9.5), (7.5, 2.5), (12, 2.5), 20)[1:], w=2.0)
+
+
+def icon_shirt(i):
+    i.line([(8.5, 3.5), (3, 6.5), (4.5, 11), (7, 10), (7, 20.5), (17, 20.5), (17, 10), (19.5, 11), (21, 6.5), (15.5, 3.5)]
+           + cubic((15.5, 3.5), (14.5, 6), (9.5, 6), (8.5, 3.5), 12)[1:], w=2.0)
+
+
+def icon_hand(i):
+    for x, top in ((8, 6), (11, 3.5), (14, 4), (17, 7)):
+        i.line([(x, 13), (x, top)], w=2.3)
+    i.line([(17, 7), (17, 15)] + cubic((17, 15), (17, 19), (14.5, 21.5), (11.5, 21.5), 12)[1:]
+           + cubic((11.5, 21.5), (8.5, 21.5), (6.5, 19.5), (4.5, 15.5), 12)[1:] + [(3.5, 13.5), (5, 12.5), (8, 15)], w=2.0)
+
+
+
 ICONS = {
     "home": icon_home, "combat": icon_combat, "esp": icon_esp, "power": icon_power, "hitbox": icon_hitbox, "luck": icon_luck,
     "visuals": icon_sun, "move": icon_move, "misc": icon_misc, "gear": icon_gear, "search": icon_search, "x": icon_x,
     "minus": icon_minus, "arrow": icon_arrow, "check": icon_check, "chevron": icon_chevron, "star": icon_star, "moon": icon_moon,
     "sun": icon_sun, "info": icon_info,
+    "eye": icon_eye, "zap": icon_zap, "bolt": icon_bolt, "swords": icon_swords, "user": icon_user, "users": icon_users,
+    "package": icon_package, "map_pin": icon_map_pin, "bell": icon_bell, "shield": icon_shield, "crosshair": icon_crosshair,
+    "target": icon_target, "flame": icon_flame, "droplet": icon_droplet, "snowflake": icon_snowflake, "crown": icon_crown,
+    "sparkles": icon_sparkles, "heart": icon_heart, "lock": icon_lock, "trash": icon_trash, "refresh": icon_refresh,
+    "download": icon_download, "play": icon_play, "pause": icon_pause, "folder": icon_folder, "wifi": icon_wifi,
+    "gauge": icon_gauge, "globe": icon_globe, "clock": icon_clock, "grid": icon_grid, "filter": icon_filter,
+    # batch 2
+    "waves": icon_waves, "wind": icon_wind, "cloud": icon_cloud, "umbrella": icon_umbrella, "anchor": icon_anchor,
+    "fish": icon_fish, "paw": icon_paw, "leaf": icon_leaf, "skull": icon_skull, "ghost": icon_ghost, "rocket": icon_rocket,
+    "send": icon_send, "car": icon_car, "gem": icon_gem, "coins": icon_coins, "gift": icon_gift, "key": icon_key,
+    "magnet": icon_magnet, "wand": icon_wand, "bomb": icon_bomb, "cart": icon_cart, "trophy": icon_trophy,
+    "music": icon_music, "volume": icon_volume, "camera": icon_camera, "pointer": icon_pointer, "keyboard": icon_keyboard,
+    "code": icon_code, "terminal": icon_terminal, "layers": icon_layers, "link": icon_link, "copy": icon_copy,
+    "edit": icon_edit, "plus": icon_plus, "list": icon_list, "menu": icon_menu, "bookmark": icon_bookmark,
+    "flag": icon_flag, "compass": icon_compass, "mountain": icon_mountain, "eye_off": icon_eye_off, "unlock": icon_unlock,
+    "bug": icon_bug, "chart": icon_chart, "activity": icon_activity, "warning": icon_warning, "upload": icon_upload,
+    "logout": icon_logout, "hourglass": icon_hourglass, "battery": icon_battery, "sword": icon_sword, "egg": icon_egg,
+    "shirt": icon_shirt, "hand": icon_hand,
 }
 
 
@@ -376,15 +971,39 @@ SOUNDS = {
 }
 
 
+def logo(width=128):
+    import glob
+    candidates = [ROOT / "78ad6145-fe15-4079-9ea6-03f9df5674d2.png", ROOT / "private" / "assets" / "furina_logo.png"]
+    src = next((c for c in candidates if c.exists()), None)
+    if src is None:
+        hits = sorted(glob.glob(str(ROOT / "**" / "*furina*logo*.png"), recursive=True))
+        src = Path(hits[0]) if hits else None
+    if src is None:
+        return None
+    im = Image.open(src).convert("RGBA")
+    s2 = min(im.size)
+    im = im.crop(((im.size[0] - s2) // 2, (im.size[1] - s2) // 2, (im.size[0] + s2) // 2, (im.size[1] + s2) // 2))
+    im = im.resize((width, width), Image.LANCZOS)
+    mask = Image.new("L", (width * 4, width * 4), 0)
+    ImageDraw.Draw(mask).ellipse((2, 2, width * 4 - 2, width * 4 - 2), fill=255)
+    mask = mask.resize((width, width), Image.LANCZOS)
+    rgb = im.convert("RGB").quantize(colors=96, method=Image.FASTOCTREE, dither=Image.Dither.NONE).convert("RGB")
+    r, g, b = rgb.split()
+    return Image.merge("RGBA", (r, g, b, mask))
+
+
 # ---------------------------------------------------------------- build
 def main():
     assets = {}
     assets["emblem"] = ("png", png_bytes(emblem(128)))
+    _logo = logo(128)
+    if _logo is not None:
+        assets["logo"] = ("png", png_bytes(_logo))
     assets["soft"] = ("png", png_bytes(soft_glow(128)))
     assets["shadow"] = ("png", png_bytes(shadow(128)))
     assets["wave"] = ("png", png_bytes(wave(128)))
     for name, fn in ICONS.items():
-        ic = Icon(64)
+        ic = Icon(40)
         fn(ic)
         assets["ic_" + name] = ("png", png_bytes(ic.done()))
     for name, fn in SOUNDS.items():
