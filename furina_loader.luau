@@ -20,6 +20,7 @@ local GAMES = {
 	{ name = "San Diego Roleplay",      file = "furina_sandiego_hub.luau",   places = { 136020512003847 } },
 	{ name = "Strike",                  file = "furina_strike_hub.luau",     places = { 114234929420007 } },
 	{ name = "Doors",                   file = "doors_hub.luau",             places = { 6516141723, 6839171747 } },
+	{ name = "Survive the Apocalypse",  file = "dist/furina_apocalypse_hub.lua", places = { 90148635862803, 116139828947259 }, universes = { 9098570654 } },
 	-- { name = "Rock Fruit", file = "RockFruitHub.luau", places = { 0 } }, -- put the real PlaceId here
 }
 
