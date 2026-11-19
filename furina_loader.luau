@@ -21,6 +21,7 @@ local GAMES = {
 	{ name = "Strike",                  file = "furina_strike_hub.luau",     places = { 114234929420007 } },
 	{ name = "Doors",                   file = "doors_hub.luau",             places = { 6516141723, 6839171747 } },
 	{ name = "Survive the Apocalypse",  file = "dist/furina_apocalypse_hub.lua", places = { 90148635862803, 116139828947259 }, universes = { 9098570654 } },
+	{ name = "Ride a Dragon",           file = "dist/furina_ridedragon_hub.lua", places = { 99432045075207, 112015690346487 }, universes = { 10767814136 } },
 	-- { name = "Rock Fruit", file = "RockFruitHub.luau", places = { 0 } }, -- put the real PlaceId here
 }
 
